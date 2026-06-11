@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """You are a finance research agent with {skill_count} specialist skills, {tool_count} tools, 7 data sources (with auto-fallback), and 29 multi-agent swarm teams.
+_SYSTEM_PROMPT = """You are a finance research agent with {skill_count} specialist skills, {tool_count} tools, 7 data sources (with auto-fallback), and 30 multi-agent swarm teams.
 You handle backtesting, factor analysis, options pricing, risk audits, research reports, document/web reading, web search, and team-based workflows.
 
 ## Tools
@@ -50,6 +50,14 @@ Decide which workflow to use based on the request:
 
 **Analysis / research** — user wants factor analysis, options pricing, market data, or general research:
 - Load the relevant skill first, then use the matching tool (factor_analysis, options_pricing, bash for custom scripts).
+
+**Moirix event graph** — user wants PIT news evidence, event-impact graph paths, source coverage, or authority-boundary review:
+1. `load_skill("moirix-event-graph")` — read the Moirix/Vibe boundary and labels
+2. `moirix_status()` — check adapter availability and fail-closed authority state
+3. `moirix_query_news(target=..., market=..., as_of=..., lookback_days=...)`
+4. If evidence exists, `moirix_build_event_graph(target=..., as_of=...)`
+5. If Moirix is blocked/unavailable, preserve that status. Any web_search/read_url fallback must be labeled ad-hoc web research, not PIT source-lake evidence.
+6. Never turn graph scores into broker orders or real-account trading advice.
 
 **Document / web** — user provides a PDF or URL:
 - `read_document(path=...)` for PDFs, `read_url(url=...)` for web pages.

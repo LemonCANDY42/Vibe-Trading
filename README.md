@@ -744,7 +744,7 @@ Settings reads are side-effect free: `GET /settings/llm` and `GET /settings/data
 
 ## 🔌 MCP Plugin
 
-Vibe-Trading exposes 36 MCP tools for any MCP-compatible client. Runs as a stdio subprocess — no server setup needed. Core research tools work with zero API keys for HK/US/crypto; trading connector tools use the selected connector profile, and `run_swarm` needs an LLM key.
+Vibe-Trading exposes 39 MCP tools for any MCP-compatible client. Runs as a stdio subprocess — no server setup needed. Core research tools work with zero API keys for HK/US/crypto; trading connector tools use the selected connector profile, and `run_swarm` needs an LLM key.
 
 <details>
 <summary><b>Claude Desktop</b></summary>
@@ -792,7 +792,17 @@ vibe-trading-mcp --transport sse  # SSE for web clients
 
 </details>
 
-**MCP tools exposed (36):** `list_skills`, `load_skill`, `start_research_goal`, `get_research_goal`, `add_goal_evidence`, `update_research_goal_status`, `backtest`, `factor_analysis`, `analyze_options`, `pattern_recognition`, `read_url`, `read_document`, `web_search`, `write_file`, `read_file`, `list_swarm_presets`, `run_swarm`, `get_market_data`, `get_swarm_status`, `get_run_result`, `list_runs`, `reap_stale_runs`, `retry_run`, `analyze_trade_journal`, `extract_shadow_strategy`, `run_shadow_backtest`, `render_shadow_report`, `scan_shadow_signals`, `trading_connections`, `trading_select_connection`, `trading_check`, `trading_account`, `trading_positions`, `trading_orders`, `trading_quote`, `trading_history`.
+**MCP tools exposed (39):** `list_skills`, `load_skill`, `start_research_goal`, `get_research_goal`, `add_goal_evidence`, `update_research_goal_status`, `backtest`, `factor_analysis`, `analyze_options`, `pattern_recognition`, `read_url`, `read_document`, `web_search`, `write_file`, `read_file`, `list_swarm_presets`, `run_swarm`, `get_market_data`, `get_swarm_status`, `get_run_result`, `list_runs`, `reap_stale_runs`, `retry_run`, `analyze_trade_journal`, `extract_shadow_strategy`, `run_shadow_backtest`, `render_shadow_report`, `scan_shadow_signals`, `moirix_status`, `moirix_query_news`, `moirix_build_event_graph`, `trading_connections`, `trading_select_connection`, `trading_check`, `trading_account`, `trading_positions`, `trading_orders`, `trading_quote`, `trading_history`.
+
+Optional local Moirix integration is research-only. The Moirix tools call a local
+`moirix_vibe_adapter` process for PIT news evidence and candidate event-impact
+graphs, write outputs under the current run's `artifacts/moirix/`, and preserve
+`blocked` / `unavailable` states instead of fabricating source-lake coverage.
+Set `MOIRIX_ADAPTER_CMD` or see the fork docs under
+`wiki/docs/kenny/PRD_PERSONAL_VIBE_MOIRIX_FORK.md`,
+`wiki/docs/kenny/CURRENT_GOAL.md`, and
+`wiki/docs/moirix/MOIRIX_EXTENSION_PLAN.md` for local checkout discovery and
+the bounded V0 scope.
 
 ### SWARM external MCP tools
 
