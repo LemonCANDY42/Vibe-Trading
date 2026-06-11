@@ -411,6 +411,7 @@ vibe-trading-mcp</code></pre>
             body: `
               <ul>
                 <li><a href="/docs/kenny/PRD_PERSONAL_VIBE_MOIRIX_FORK.md">Personal Vibe-Moirix fork PRD</a></li>
+                <li><a href="/docs/kenny/MAINTENANCE_PARADIGM.md">Maintenance paradigm</a></li>
                 <li><a href="/docs/kenny/CURRENT_GOAL.md">Current V0 goal</a></li>
                 <li><a href="/docs/kenny/UPSTREAM_SYNC_POLICY.md">Upstream sync policy</a></li>
                 <li><a href="/docs/kenny/REVIEW_MOIRIX_EXTENSION_V0.md">Moirix Extension V0 review</a></li>
@@ -430,7 +431,7 @@ vibe-trading-mcp</code></pre>
             id: "acceptance",
             title: "Acceptance",
             body: `
-              <p>Completion is measured by the tracked PRD and current-goal docs existing under <code>wiki/docs/kenny/</code>, Moirix implementation docs reflecting implemented vs deferred scope, <code>git diff --check</code> passing, and the targeted Moirix tool plus skill/swarm tests passing locally.</p>
+              <p>Completion is measured by the tracked PRD, maintenance paradigm, and current-goal docs existing under <code>wiki/docs/kenny/</code>, Moirix implementation docs reflecting implemented vs deferred scope, <code>git diff --check</code> passing, and the targeted Moirix tool plus skill/swarm tests passing locally.</p>
             `
           }
         ]

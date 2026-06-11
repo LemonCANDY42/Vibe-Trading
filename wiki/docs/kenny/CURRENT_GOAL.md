@@ -3,6 +3,7 @@
 ## Source Of Truth
 
 - PRD: `wiki/docs/kenny/PRD_PERSONAL_VIBE_MOIRIX_FORK.md`
+- Maintenance paradigm: `wiki/docs/kenny/MAINTENANCE_PARADIGM.md`
 - Moirix adapter boundary: `wiki/docs/moirix/MOIRIX_EXTENSION_PLAN.md`
 - Local Moirix contract docs:
   - `/Users/kennymccormick/github/Moirix/docs/VIBE_EXTENSION_CONTRACT.md`
@@ -10,6 +11,9 @@
 
 The repository root `docs/` directory is ignored by this fork. Fork-owned
 Kenny docs therefore live under `wiki/docs/kenny/`.
+
+For future work, treat `wiki/docs/kenny/MAINTENANCE_PARADIGM.md` as the default
+workflow standard for this personal fork.
 
 ## Objective
 

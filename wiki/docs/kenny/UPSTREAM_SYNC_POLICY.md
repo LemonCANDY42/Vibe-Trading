@@ -1,5 +1,9 @@
 # Upstream Sync Policy
 
+This policy is a specialized companion to
+`wiki/docs/kenny/MAINTENANCE_PARADIGM.md`. Use the maintenance paradigm for the
+overall work sequence, then this document for branch and upstream-sync details.
+
 ## Branch Roles
 
 This fork keeps upstream and Kenny-specific work separated:

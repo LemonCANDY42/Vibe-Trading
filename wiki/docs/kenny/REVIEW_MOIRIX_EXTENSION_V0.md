@@ -9,6 +9,9 @@ the primary research workbench, keep Moirix as an optional local extension, and
 protect upstream sync by isolating custom code in narrow `moirix_*` files,
 skills, swarm presets, and fork-owned docs.
 
+This pattern is now captured as the standard maintenance workflow in
+`wiki/docs/kenny/MAINTENANCE_PARADIGM.md`.
+
 This is the right shape for the current stage because it avoids rebuilding Vibe
 loaders, agent loop, session/memory, backtest engines, or broker surfaces while
 still exposing Moirix's differentiated value: PIT evidence status,
