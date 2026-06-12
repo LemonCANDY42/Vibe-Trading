@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -11,6 +11,7 @@ import {
   Download,
   FileCheck2,
   Fingerprint,
+  Gauge,
   List,
   ShieldCheck,
   XCircle,
@@ -29,6 +30,22 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 const rehypePlugins = [rehypeHighlight];
 
 type Tab = "chart" | "trades" | "runCard" | "code" | "validation" | "moirixEvidence" | "moirixGraph" | "moirixAuthority";
+
+function parseTab(value: string | null): Tab {
+  switch (value) {
+    case "chart":
+    case "trades":
+    case "runCard":
+    case "code":
+    case "validation":
+    case "moirixEvidence":
+    case "moirixGraph":
+    case "moirixAuthority":
+      return value;
+    default:
+      return "chart";
+  }
+}
 
 function downloadCsv(filename: string, csvContent: string) {
   const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
@@ -65,9 +82,10 @@ function buildMetricsCsv(metrics: BacktestMetrics): string {
 export function RunDetail() {
   const { runId } = useParams<{ runId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [run, setRun] = useState<RunData | null>(null);
   const [code, setCode] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState<Tab>("chart");
+  const [tab, setTab] = useState<Tab>(() => parseTab(searchParams.get("tab")));
   const [loading, setLoading] = useState(true);
 
   const hasValidation = !!run?.validation;
@@ -91,6 +109,10 @@ export function RunDetail() {
       api.getRunCode(runId).catch(() => ({})),
     ]).then(([r, c]) => { setRun(r); setCode(c || {}); }).finally(() => setLoading(false));
   }, [runId]);
+
+  useEffect(() => {
+    setTab(parseTab(searchParams.get("tab")));
+  }, [searchParams]);
 
   if (loading) {
     return (
@@ -137,6 +159,7 @@ export function RunDetail() {
         </div>
         {run.prompt && <p className="text-sm text-muted-foreground">{run.prompt}</p>}
         {run.metrics && <MetricsCard metrics={run.metrics as Record<string, number>} />}
+        {run.llm_usage && <LLMUsagePanel usage={run.llm_usage} />}
 
         <div className="flex items-center gap-1">
           {TABS.filter(t => !t.hidden).map(({ id, label, icon: Icon }) => (
@@ -195,6 +218,72 @@ function hasMoirixArtifacts(run: RunData | null): boolean {
   if (!run) return false;
   if (run.moirix_artifacts && Object.keys(run.moirix_artifacts).length > 0) return true;
   return (run.artifacts || []).some((artifact) => artifact.name.startsWith("moirix/") || artifact.path.includes("/artifacts/moirix/"));
+}
+
+function LLMUsagePanel({ usage }: { usage: NonNullable<RunData["llm_usage"]> }) {
+  const iterations = (usage.iterations || [])
+    .filter((item) => item && typeof item === "object")
+    .map((item) => ({
+      iter: toFiniteNumber(item.iter),
+      input: toFiniteNumber(item.input_tokens),
+      output: toFiniteNumber(item.output_tokens),
+      cache: toFiniteNumber(item.cache_creation_input_tokens) + toFiniteNumber(item.cache_read_input_tokens),
+      total: toFiniteNumber(item.total_tokens),
+    }))
+    .filter((item) => item.input || item.output || item.total);
+  const maxTotal = Math.max(1, ...iterations.map((item) => item.total || item.input + item.output + item.cache));
+  const calls = typeof usage.calls === "number" ? usage.calls : iterations.length;
+  const providerModel = [usage.provider, usage.model].filter(Boolean).join(" / ") || "Unknown provider";
+  const cacheTokens = toFiniteNumber(usage.cache_creation_input_tokens) + toFiniteNumber(usage.cache_read_input_tokens);
+
+  return (
+    <section className="rounded-md border bg-card p-3">
+      <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+        <Gauge className="h-4 w-4 text-muted-foreground" />
+        Agent Usage
+      </div>
+      <div className="grid gap-3 md:grid-cols-5">
+        <RunCardStat label="Input tokens" value={formatTokenCount(usage.input_tokens)} />
+        <RunCardStat label="Output tokens" value={formatTokenCount(usage.output_tokens)} />
+        <RunCardStat label="Cache tokens" value={formatTokenCount(cacheTokens)} />
+        <RunCardStat label="Total tokens" value={formatTokenCount(usage.total_tokens)} />
+        <RunCardStat label="LLM calls" value={String(calls)} />
+      </div>
+      <div className="mt-3 truncate text-xs text-muted-foreground">{providerModel}</div>
+      {iterations.length > 0 && (
+        <div className="mt-3 space-y-2">
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-sky-500" />Input</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-emerald-500" />Output</span>
+            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-sm bg-amber-500" />Cache</span>
+            <span className="ml-auto">per iteration</span>
+          </div>
+          {iterations.slice(0, 20).map((item, index) => {
+            const total = item.total || item.input + item.output + item.cache;
+            const totalWidth = Math.max(2, Math.min(100, (total / maxTotal) * 100));
+            const inputShare = total > 0 ? Math.min(100, (item.input / total) * 100) : 0;
+            const outputShare = total > 0 ? Math.min(100, (item.output / total) * 100) : 0;
+            const cacheShare = total > 0 ? Math.max(0, 100 - inputShare - outputShare) : 0;
+            return (
+              <div key={`${item.iter}-${index}`} className="grid grid-cols-[3rem_1fr_5.5rem] items-center gap-2 text-xs">
+                <div className="font-mono text-muted-foreground">#{item.iter || index + 1}</div>
+                <div className="h-3 overflow-hidden rounded-sm bg-muted">
+                  <div className="flex h-full" style={{ width: `${totalWidth}%` }}>
+                    <div className="h-full bg-sky-500" style={{ width: `${inputShare}%` }} />
+                    <div className="h-full bg-emerald-500" style={{ width: `${outputShare}%` }} />
+                    <div className="h-full bg-amber-500" style={{ width: `${cacheShare}%` }} />
+                  </div>
+                </div>
+                <div className="text-right font-mono tabular-nums text-muted-foreground">
+                  {formatTokenCount(total)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "graph" | "authority" }) {
@@ -260,6 +349,9 @@ function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "graph" | "
           <JsonBlock value={data.vibe_run_card_patch} />
         </RunCardPanel>
       </div>
+      <RunCardPanel title="Authority Checks" icon={ShieldCheck}>
+        <JsonBlock value={data.authority_checks} />
+      </RunCardPanel>
       <RunCardPanel title="Moirix Artifact Manifest" icon={Database}>
         <PreviewTable value={(data.artifact_names as string[] | undefined)?.map((name) => ({ artifact: name }))} empty="No Moirix artifact manifest recorded." />
       </RunCardPanel>
@@ -446,6 +538,15 @@ function formatBytes(value: number): string {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function toFiniteNumber(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value || 0);
+  return Number.isFinite(numeric) ? Math.max(0, numeric) : 0;
+}
+
+function formatTokenCount(value: unknown): string {
+  return Math.round(toFiniteNumber(value)).toLocaleString();
 }
 
 function shortHash(value: string): string {

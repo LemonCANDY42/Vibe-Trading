@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -23,6 +25,7 @@ _CONDA_EXE_ENV = "MOIRIX_CONDA_EXE"
 _CONDA_ENV = "MOIRIX_CONDA_ENV"
 _DEFAULT_CONDA_ENV = "moirix"
 _ARTIFACT_SUBDIR = "artifacts/moirix"
+_AUTHORITY_CHECK_SUBDIR = "authority_checks"
 _VALID_STATUSES = {"ok", "blocked", "unavailable"}
 _FALSE_AUTHORITY_FIELDS = (
     "live_broker_execution_enabled",
@@ -48,6 +51,27 @@ def adapter_artifact_dir(run_dir: str) -> Path:
     out_dir = safe_path(_ARTIFACT_SUBDIR, run_root)
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
+
+
+def adapter_authority_artifact_dir(run_dir: str, proposal_path: Path) -> Path:
+    """Return a per-proposal authority-check artifact directory.
+
+    Moirix adapter commands write common files such as ``status.json`` and
+    ``coverage_status.json``. Authority checks are intentionally isolated from
+    the main graph/signal artifact directory so a blocked proposal cannot
+    overwrite the run's primary Moirix graph status.
+    """
+    root = adapter_artifact_dir(run_dir)
+    stem = _safe_artifact_segment(proposal_path.stem) or "proposal"
+    digest = hashlib.sha256(str(proposal_path.resolve()).encode("utf-8")).hexdigest()[:8]
+    out_dir = safe_path(f"{_AUTHORITY_CHECK_SUBDIR}/{stem}-{digest}", root)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
+def _safe_artifact_segment(value: str) -> str:
+    segment = re.sub(r"[^a-zA-Z0-9_.-]+", "_", value.strip()).strip("._-").lower()
+    return segment[:64]
 
 
 def resolve_news_input(input_path: str | None, run_dir: str) -> tuple[Path | None, dict[str, Any] | None]:

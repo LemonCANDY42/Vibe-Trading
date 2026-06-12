@@ -114,6 +114,7 @@ class RunResponse(BaseModel):
     metrics: Optional[BacktestMetrics] = Field(None, description="Backtest metrics")
     artifacts: List[Artifact] = Field(default_factory=list, description="Run artifacts")
     run_card: Optional[Dict[str, Any]] = Field(None, description="Trust Layer run card payload")
+    llm_usage: Optional[Dict[str, Any]] = Field(None, description="Persisted AgentLoop LLM usage summary")
 
     equity_curve: Optional[List[Dict[str, Any]]] = Field(None, description="Equity preview")
     trade_log: Optional[List[Dict[str, Any]]] = Field(None, description="Trade preview")
@@ -907,7 +908,9 @@ def _build_llm_settings_response(values: Optional[Dict[str, str]] = None) -> LLM
     env_values = values if values is not None else _read_settings_env_values()
     provider_name = env_values.get("LANGCHAIN_PROVIDER", "openai").strip().lower()
     provider = LLM_PROVIDER_BY_NAME.get(provider_name, LLM_PROVIDER_BY_NAME["openai"])
-    api_key = env_values.get(provider.api_key_env or "", "") if provider.api_key_env else ""
+    api_key = ""
+    if provider.api_key_env:
+        api_key = env_values.get(provider.api_key_env, "") or os.environ.get(provider.api_key_env, "")
     api_key_configured = _is_configured_secret(api_key, LLM_API_KEY_PLACEHOLDERS)
     api_key_hint = None
     if provider.auth_type == "oauth":
@@ -1117,6 +1120,8 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
         except (json.JSONDecodeError, OSError):
             pass
 
+    response.llm_usage = _load_json_file(run_dir / "artifacts" / "llm_usage.json")
+
     trades_path = run_dir / "artifacts" / "trades.csv"
     if trades_path.exists():
         response.artifacts_trades_csv = _load_csv_to_dict(trades_path)
@@ -1198,10 +1203,44 @@ def _load_moirix_artifact_previews(run_dir: Path) -> Optional[Dict[str, Any]]:
         if path.is_file():
             payload[key] = _load_csv_to_dict(path, limit=20)
 
+    authority_checks = _load_moirix_authority_checks(moirix_dir)
+    if authority_checks:
+        payload["authority_checks"] = authority_checks
+
     if not payload:
         return None
     payload["artifact_names"] = sorted(path.relative_to(moirix_dir).as_posix() for path in moirix_dir.rglob("*") if path.is_file())
     return payload
+
+
+def _load_moirix_authority_checks(moirix_dir: Path) -> List[Dict[str, Any]]:
+    checks_root = moirix_dir / "authority_checks"
+    if not checks_root.is_dir():
+        return []
+
+    checks: List[Dict[str, Any]] = []
+    for check_dir in sorted(path for path in checks_root.iterdir() if path.is_dir())[:20]:
+        item: Dict[str, Any] = {"id": check_dir.name}
+        for key, filename in {
+            "status": "status.json",
+            "request": "request.json",
+            "coverage_status": "coverage_status.json",
+            "authority_status": "authority_status.json",
+            "moirix_authority_status": "moirix_authority_status.json",
+            "vibe_run_card_patch": "vibe_run_card_patch.json",
+        }.items():
+            value = _load_json_file(check_dir / filename)
+            if value is not None:
+                item[key] = value
+        summary_path = check_dir / "moirix_summary.md"
+        if summary_path.is_file():
+            try:
+                item["moirix_summary_markdown"] = summary_path.read_text(encoding="utf-8")[:10000]
+            except OSError:
+                pass
+        if len(item) > 1:
+            checks.append(item)
+    return checks
 
 
 def _load_jsonl_preview(path: Path, *, limit: int) -> List[Dict[str, Any]]:

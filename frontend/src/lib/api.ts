@@ -372,6 +372,7 @@ export interface RunData {
   metrics?: BacktestMetrics;
   artifacts?: ArtifactInfo[];
   run_card?: RunCard;
+  llm_usage?: LLMUsageSummary | null;
   validation?: ValidationData;
   moirix_artifacts?: Record<string, unknown>;
 
@@ -381,6 +382,30 @@ export interface RunData {
   equity_curve?: EquityPoint[];
   trade_log?: Array<Record<string, string>>;
   run_logs?: Array<{ source?: string; line_number?: number; message?: string }>;
+}
+
+export interface LLMUsageIteration {
+  iter: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  total_tokens: number;
+}
+
+export interface LLMUsageSummary {
+  schema_version?: string;
+  provider?: string | null;
+  model?: string | null;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+  total_tokens?: number;
+  calls?: number;
+  iterations?: LLMUsageIteration[];
+  updated_at?: string;
+  [key: string]: unknown;
 }
 
 export interface RunCard {

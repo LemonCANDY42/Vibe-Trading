@@ -1,13 +1,14 @@
 ---
 name: moirix-event-graph
-description: Use the optional Moirix local adapter for PIT news evidence, event-impact graph hypotheses, and authority-boundary reporting.
+description: Use the optional Moirix local adapter for PIT news evidence, event-impact graph hypotheses, event-signal backtests, and authority-boundary reporting.
 category: strategy
 ---
 # Moirix Event Graph
 
 Use this skill when the user asks how news, announcements, filings, macro
 events, policy events, or supply-chain events may affect a target instrument,
-sector, ETF, or related assets.
+sector, ETF, or related assets. Also use it when the user asks for a
+news-aware, event-driven, event-signal, or Moirix-backed backtest.
 
 ## Workflow
 
@@ -19,13 +20,17 @@ sector, ETF, or related assets.
    `event_impact_graph.json` and related Moirix artifacts.
 4. If event features are needed, call `moirix_export_event_signal` to expose
    `event_signal.csv` under `artifacts/moirix/`.
-5. If the user asks for forward returns or event-study validation, call
-   `moirix_event_signal_backtest` with an explicit daily close price CSV.
-   Treat forward returns as outcome labels, not features visible at `known_at`.
+5. If the user asks for a news-aware backtest, event-signal backtest, forward
+   returns, or event-study validation, call `moirix_event_signal_backtest` with
+   an explicit daily close price CSV. Treat forward returns as outcome labels,
+   not features visible at `known_at`.
 6. Convert the graph output into hypotheses, impacted-instrument paths,
    coverage gaps, and possible event CSV or factor candidates for later Vibe
    backtesting.
-7. State the authority boundary: graph scores are research hypotheses, not
+7. If checking a proposal, call `moirix_authority_guard`. Its outputs live under
+   `artifacts/moirix/authority_checks/<proposal-id>/` so a blocked proposal does
+   not overwrite the primary graph/signal artifacts.
+8. State the authority boundary: graph scores are research hypotheses, not
    direct trading orders.
 
 ## Labels
@@ -47,5 +52,6 @@ sector, ETF, or related assets.
   consumes `event_signal.csv` and explicit price CSV artifacts only.
 - Do not claim historical or real-time news coverage unless Moirix returns
   coverage evidence for the requested window.
-- Do not write outside the current run artifacts. Moirix tool outputs belong
-  under `artifacts/moirix/`.
+- Do not write outside the current run artifacts. Primary Moirix tool outputs
+  belong under `artifacts/moirix/`; proposal authority checks belong under
+  `artifacts/moirix/authority_checks/`.

@@ -18,6 +18,7 @@ from src.agent.loop import (
     _fix_tool_pairs,
     _is_tool_success,
     _normalize_tool_run_dir,
+    _normalize_llm_usage,
 )
 
 
@@ -41,6 +42,22 @@ class TestEstimateTokens:
         tokens = estimate_tokens(msg)
         # Should be roughly 100 tokens for 400 chars of content (plus overhead)
         assert 80 < tokens < 200
+
+
+def test_normalize_llm_usage_preserves_provider_cache_tokens() -> None:
+    usage = _normalize_llm_usage({
+        "input_tokens": 39,
+        "output_tokens": 2,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 128,
+    })
+
+    assert usage == {
+        "input_tokens": 39,
+        "output_tokens": 2,
+        "cache_read_input_tokens": 128,
+        "total_tokens": 169,
+    }
 
 
 # ---------------------------------------------------------------------------

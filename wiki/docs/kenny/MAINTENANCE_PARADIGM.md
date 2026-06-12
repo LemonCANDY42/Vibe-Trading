@@ -223,6 +223,9 @@ Allowed:
 - `moirix-event-graph` skill;
 - `moirix_event_impact_desk` swarm;
 - run artifacts under `artifacts/moirix/`;
+- authority-check artifacts under
+  `artifacts/moirix/authority_checks/<proposal-id>/` to avoid overwriting the
+  primary graph/signal `status.json` and `coverage_status.json`;
 - fail-closed status preservation.
 
 Deferred:

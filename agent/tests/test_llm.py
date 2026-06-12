@@ -119,18 +119,18 @@ class TestSyncProviderEnv:
         result = self._run_sync({
             "LANGCHAIN_PROVIDER": "minimax",
             "MINIMAX_API_KEY": "minimax-key-123",
-            "MINIMAX_BASE_URL": "https://api.minimax.io/v1",
+            "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",
         })
         assert result["OPENAI_API_KEY"] == "minimax-key-123"
-        assert result["OPENAI_API_BASE"] == "https://api.minimax.io/v1"
+        assert result["OPENAI_API_BASE"] == "https://api.minimaxi.com/anthropic"
 
     def test_minimax_base_url_in_openai_base_url(self) -> None:
         result = self._run_sync({
             "LANGCHAIN_PROVIDER": "minimax",
             "MINIMAX_API_KEY": "minimax-key",
-            "MINIMAX_BASE_URL": "https://api.minimax.io/v1",
+            "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",
         })
-        assert "minimax.io" in result["OPENAI_BASE_URL"]
+        assert "minimaxi.com/anthropic" in result["OPENAI_BASE_URL"]
 
 
 # ---------------------------------------------------------------------------
@@ -146,23 +146,16 @@ class TestMinimaxTemperature:
         import src.providers.llm as llm_mod
         llm_mod._dotenv_loaded = True
 
-        captured: dict[str, float] = {}
-
-        class _FakeChatOpenAI:
-            def __init__(self, **kwargs: object) -> None:
-                captured["temperature"] = float(kwargs.get("temperature", -1))
-
         env = {
             "LANGCHAIN_PROVIDER": "minimax",
             "MINIMAX_API_KEY": "minimax-key",
-            "MINIMAX_BASE_URL": "https://api.minimax.io/v1",
+            "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",
             "LANGCHAIN_MODEL_NAME": "MiniMax-M3",
             "LANGCHAIN_TEMPERATURE": "0.0",
         }
         with patch.dict(os.environ, env, clear=True):
-            with patch.object(llm_mod, "ChatOpenAIWithReasoning", _FakeChatOpenAI):
-                build_llm()
-        assert captured["temperature"] == 0.01, (
+            result = build_llm()
+        assert result.temperature == 0.01, (
             "MiniMax temperature must be clamped to 0.01 when 0.0 is configured"
         )
 
@@ -171,23 +164,82 @@ class TestMinimaxTemperature:
         import src.providers.llm as llm_mod
         llm_mod._dotenv_loaded = True
 
-        captured: dict[str, float] = {}
-
-        class _FakeChatOpenAI:
-            def __init__(self, **kwargs: object) -> None:
-                captured["temperature"] = float(kwargs.get("temperature", -1))
-
         env = {
             "LANGCHAIN_PROVIDER": "minimax",
             "MINIMAX_API_KEY": "minimax-key",
-            "MINIMAX_BASE_URL": "https://api.minimax.io/v1",
+            "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",
             "LANGCHAIN_MODEL_NAME": "MiniMax-M3",
             "LANGCHAIN_TEMPERATURE": "0.7",
         }
         with patch.dict(os.environ, env, clear=True):
+            result = build_llm()
+        assert result.temperature == 0.7
+
+    def test_minimax_defaults_to_standard_non_thinking_mode(self) -> None:
+        """MiniMax-M3 standard mode must explicitly disable thinking."""
+        import src.providers.llm as llm_mod
+        llm_mod._dotenv_loaded = True
+
+        env = {
+            "LANGCHAIN_PROVIDER": "minimax",
+            "MINIMAX_API_KEY": "minimax-key",
+            "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",
+            "LANGCHAIN_MODEL_NAME": "MiniMax-M3",
+            "LANGCHAIN_TEMPERATURE": "0.01",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = build_llm()
+
+        assert result.thinking == "disabled"
+        assert result.service_tier == "standard"
+        assert result.base_url == "https://api.minimaxi.com/anthropic"
+
+    def test_minimax_can_opt_into_adaptive_priority_mode(self) -> None:
+        """MiniMax provider keeps advanced agentic mode configurable."""
+        import src.providers.llm as llm_mod
+        llm_mod._dotenv_loaded = True
+
+        env = {
+            "LANGCHAIN_PROVIDER": "minimax",
+            "MINIMAX_API_KEY": "minimax-key",
+            "MINIMAX_BASE_URL": "https://api.minimaxi.com/anthropic",
+            "LANGCHAIN_MODEL_NAME": "MiniMax-M3",
+            "MINIMAX_THINKING": "adaptive",
+            "MINIMAX_SERVICE_TIER": "priority",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = build_llm()
+
+        assert result.thinking == "adaptive"
+        assert result.service_tier == "priority"
+
+    def test_minimax_openai_compatible_keeps_chat_openai_path(self) -> None:
+        """MiniMax /v1 remains supported for OpenAI-compatible deployments."""
+        import src.providers.llm as llm_mod
+        llm_mod._dotenv_loaded = True
+
+        captured: dict = {}
+
+        class _FakeChatOpenAI:
+            def __init__(self, **kwargs: object) -> None:
+                captured.update(kwargs)
+
+        env = {
+            "LANGCHAIN_PROVIDER": "minimax",
+            "MINIMAX_API_KEY": "minimax-key",
+            "MINIMAX_BASE_URL": "https://api.minimaxi.com/v1",
+            "LANGCHAIN_MODEL_NAME": "MiniMax-M3",
+            "LANGCHAIN_TEMPERATURE": "0.01",
+        }
+        with patch.dict(os.environ, env, clear=True):
             with patch.object(llm_mod, "ChatOpenAIWithReasoning", _FakeChatOpenAI):
                 build_llm()
-        assert captured["temperature"] == 0.7
+
+        assert captured["extra_body"] == {
+            "thinking": {"type": "disabled"},
+            "service_tier": "standard",
+        }
+        assert captured["stream_usage"] is True
 
 
 class TestReasoningEffortPassthrough:
@@ -237,5 +289,3 @@ class TestReasoningEffortPassthrough:
             "LANGCHAIN_REASONING_EFFORT": "HIGH",
         })
         assert captured["extra_body"]["reasoning"]["effort"] == "high"
-
-

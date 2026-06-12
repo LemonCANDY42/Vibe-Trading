@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
+from src.providers.minimax_anthropic import build_minimax_anthropic_llm
+
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -445,14 +447,38 @@ def build_llm(*, model_name: Optional[str] = None, callbacks: Any = None) -> Any
     # default 0.0 is used to avoid an API validation error.
     if provider == "minimax" and temperature <= 0.0:
         temperature = 0.01
+    if provider == "minimax" and _uses_anthropic_base_url(os.getenv("MINIMAX_BASE_URL", "")):
+        return build_minimax_anthropic_llm(
+            model=name,
+            temperature=temperature,
+            timeout=int(os.getenv("TIMEOUT_SECONDS", "120")),
+            max_retries=int(os.getenv("MAX_RETRIES", "2")),
+        )
     # Optional reasoning activation for relays requiring opt-in (e.g. OpenRouter).
     # Moonshot/DeepSeek official APIs emit reasoning by default and ignore this field.
     effort = os.getenv("LANGCHAIN_REASONING_EFFORT", "").strip().lower()
+    extra_body = {"reasoning": {"effort": effort}} if effort else None
+    if provider == "minimax":
+        # MiniMax-M3 defaults to thinking unless explicitly disabled. Keep this
+        # configurable because agentic runs may intentionally opt back into
+        # adaptive thinking, while ordinary "standard" mode should be direct.
+        thinking = os.getenv("MINIMAX_THINKING", "disabled").strip().lower()
+        service_tier = os.getenv("MINIMAX_SERVICE_TIER", "standard").strip().lower()
+        extra_body = extra_body or {}
+        if thinking in {"disabled", "adaptive"}:
+            extra_body["thinking"] = {"type": thinking}
+        if service_tier in {"standard", "priority"}:
+            extra_body["service_tier"] = service_tier
     return ChatOpenAIWithReasoning(
         model=name,
         temperature=temperature,
         timeout=int(os.getenv("TIMEOUT_SECONDS", "120")),
         max_retries=int(os.getenv("MAX_RETRIES", "2")),
         callbacks=callbacks,
-        extra_body={"reasoning": {"effort": effort}} if effort else None,
+        extra_body=extra_body,
+        stream_usage=True if provider == "minimax" else None,
     )
+
+
+def _uses_anthropic_base_url(base_url: str) -> bool:
+    return "/anthropic" in urlsplit(base_url.strip()).path.rstrip("/")

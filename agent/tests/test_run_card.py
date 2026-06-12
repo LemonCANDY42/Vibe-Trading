@@ -130,6 +130,8 @@ def test_api_run_response_includes_run_card(tmp_path: Path) -> None:
 
     run_dir = tmp_path / "run_001"
     run_dir.mkdir()
+    artifacts_dir = run_dir / "artifacts"
+    artifacts_dir.mkdir()
     (run_dir / "state.json").write_text('{"status": "success"}\n', encoding="utf-8")
     run_card = {
         "schema_version": "0.1",
@@ -143,10 +145,22 @@ def test_api_run_response_includes_run_card(tmp_path: Path) -> None:
         "artifacts": [{"path": "artifacts/metrics.csv", "size_bytes": 42, "sha256": "feed"}],
     }
     (run_dir / "run_card.json").write_text(json.dumps(run_card), encoding="utf-8")
+    llm_usage = {
+        "schema_version": "0.1",
+        "provider": "openai",
+        "model": "gpt-test",
+        "input_tokens": 100,
+        "output_tokens": 25,
+        "total_tokens": 125,
+        "calls": 1,
+        "iterations": [{"iter": 1, "input_tokens": 100, "output_tokens": 25, "total_tokens": 125}],
+    }
+    (artifacts_dir / "llm_usage.json").write_text(json.dumps(llm_usage), encoding="utf-8")
 
     response = api_server._build_response_from_run_dir(run_dir, elapsed=0.0)
 
     assert response.run_card == run_card
+    assert response.llm_usage == llm_usage
 
 
 def test_api_run_response_surfaces_moirix_artifact_previews(tmp_path: Path) -> None:
@@ -155,6 +169,8 @@ def test_api_run_response_surfaces_moirix_artifact_previews(tmp_path: Path) -> N
     run_dir = tmp_path / "run_moirix"
     moirix_dir = run_dir / "artifacts" / "moirix"
     moirix_dir.mkdir(parents=True)
+    authority_check_dir = moirix_dir / "authority_checks" / "proposal-abc12345"
+    authority_check_dir.mkdir(parents=True)
     (run_dir / "state.json").write_text('{"status": "success"}\n', encoding="utf-8")
     (moirix_dir / "status.json").write_text('{"status":"ok"}\n', encoding="utf-8")
     (moirix_dir / "coverage_status.json").write_text('{"coverage":{"row_count":1}}\n', encoding="utf-8")
@@ -167,16 +183,25 @@ def test_api_run_response_surfaces_moirix_artifact_previews(tmp_path: Path) -> N
         "known_at,symbol,event_type,pit_valid\n2025-01-02,NVDA,fixture,true\n",
         encoding="utf-8",
     )
+    (authority_check_dir / "status.json").write_text('{"status":"blocked"}\n', encoding="utf-8")
+    (authority_check_dir / "request.json").write_text('{"proposal_scope":"live_trading"}\n', encoding="utf-8")
+    (authority_check_dir / "moirix_authority_status.json").write_text(
+        '{"claim_gate":{"blockers":["broker_write_requested"]}}\n',
+        encoding="utf-8",
+    )
 
     response = api_server._build_response_from_run_dir(run_dir, elapsed=0.0)
 
     artifact_names = {artifact.name for artifact in response.artifacts}
     assert "moirix/status.json" in artifact_names
     assert "moirix/event_signal.csv" in artifact_names
+    assert "moirix/authority_checks/proposal-abc12345/status.json" in artifact_names
     assert response.moirix_artifacts is not None
     assert response.moirix_artifacts["status"]["status"] == "ok"
     assert response.moirix_artifacts["event_signal_preview"][0]["symbol"] == "NVDA"
     assert response.moirix_artifacts["moirix_summary_markdown"].startswith("# Moirix")
+    assert response.moirix_artifacts["authority_checks"][0]["id"] == "proposal-abc12345"
+    assert response.moirix_artifacts["authority_checks"][0]["status"]["status"] == "blocked"
 
 
 def test_runner_artifact_spec_surfaces_run_card_paths() -> None:

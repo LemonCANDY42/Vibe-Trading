@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from src.agent.tools import BaseTool
-from src.tools._moirix_adapter import adapter_artifact_dir, call_adapter, resolve_adapter_input
+from src.tools._moirix_adapter import adapter_authority_artifact_dir, call_adapter, resolve_adapter_input
 
 
 class MoirixAuthorityGuardTool(BaseTool):
@@ -17,7 +17,10 @@ class MoirixAuthorityGuardTool(BaseTool):
         "Check a proposal JSON through the local Moirix authority guard. "
         "Research-only and paper-proposal-only requests may pass; broker writes, "
         "orders, custody actions, live trading, or real-money authority must be "
-        "blocked. This tool never submits, cancels, or modifies orders."
+        "blocked. Authority-check artifacts are isolated under "
+        "artifacts/moirix/authority_checks so blocked checks do not overwrite the "
+        "run's main Moirix graph/signal artifacts. This tool never submits, "
+        "cancels, or modifies orders."
     )
     parameters = {
         "type": "object",
@@ -43,10 +46,9 @@ class MoirixAuthorityGuardTool(BaseTool):
             return json.dumps(
                 {"status": "error", "error": "run_dir is required for moirix_authority_guard artifacts"},
                 ensure_ascii=False,
-            )
+        )
 
         try:
-            out_dir = adapter_artifact_dir(str(run_dir))
             proposal_path, error = resolve_adapter_input(
                 kwargs.get("proposal_path"),
                 str(run_dir),
@@ -59,6 +61,11 @@ class MoirixAuthorityGuardTool(BaseTool):
             return json.dumps(error, ensure_ascii=False)
         if proposal_path is None:
             return json.dumps({"status": "error", "error": "proposal_path could not be resolved"}, ensure_ascii=False)
+
+        try:
+            out_dir = adapter_authority_artifact_dir(str(run_dir), proposal_path)
+        except ValueError as exc:
+            return json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False)
 
         timeout = int(kwargs.get("timeout_seconds") or 120)
         payload = call_adapter(

@@ -21,6 +21,18 @@ uses the SSD-backed Moirix/news/bar data where available for testing and
 backtesting, and uses the logged-in IBKR paper gateway only for read-only
 readiness checks.
 
+## Current Next Goal
+
+G11 is the active next implementation target:
+
+```text
+Make a normal Vibe Agent run able to produce a news-aware Moirix event-signal
+research run and a visible token-usage chart in Run Detail.
+```
+
+This is a new goal on top of the completed PRD foundation. G1-G10 remain the
+historical baseline and acceptance evidence for the fork.
+
 ## Baseline Already Completed
 
 The fork already has a pushed V0 foundation on
@@ -163,7 +175,12 @@ Outcome:
   - `moirix_event_signal_backtest`
   - `moirix_authority_guard`
 - Tool wrappers preserve `ok` / `blocked` / `unavailable`.
-- Tool outputs stay under the current run's `artifacts/moirix/`.
+- News, graph, event-signal, and export outputs stay under the current run's
+  primary `artifacts/moirix/` directory.
+- `moirix_authority_guard` writes per-proposal outputs under
+  `artifacts/moirix/authority_checks/<proposal-id>/` so blocked proposal checks
+  cannot overwrite the run's primary `status.json`, `coverage_status.json`, or
+  graph/signal artifacts.
 - No broker/order/live-trading parameters are exposed.
 
 Verification:
@@ -191,7 +208,8 @@ Observed evidence:
   - `moirix_build_event_graph`: `ok`, wrote `event_signal.csv`;
   - `moirix_export_event_signal`: `ok`, copied `event_signal.csv`;
   - `moirix_authority_guard`: `blocked` for broker-write proposal with
-    blockers including `broker_write_requested` and `submit_order_requested`.
+    blockers including `broker_write_requested` and `submit_order_requested`,
+    with outputs isolated under `artifacts/moirix/authority_checks/`.
 
 ### G4: Run Artifact Integration
 
@@ -234,7 +252,9 @@ Observed evidence:
   - `moirix_build_event_graph`: `ok`;
   - `moirix_export_event_signal`: `ok`;
   - `moirix_authority_guard`: `blocked` for broker-write proposal;
-  - all required files present under `artifacts/moirix/`.
+  - primary graph/signal files present under `artifacts/moirix/`;
+  - authority-check files present under
+    `artifacts/moirix/authority_checks/<proposal-id>/`.
 
 ### G5: Event Signal To Backtest
 
@@ -302,6 +322,9 @@ Observed evidence:
 - `/runs/{id}` now recursively lists nested artifacts such as
   `moirix/status.json` and exposes `moirix_artifacts` previews for selected
   JSON, Markdown, JSONL, and CSV files.
+- Per-proposal authority checks are previewed from
+  `artifacts/moirix/authority_checks/<proposal-id>/` so blocked checks remain
+  visible without overwriting primary graph/signal status files.
 - Run Detail conditionally shows:
   - `Moirix Evidence`
   - `Moirix Graph`
@@ -491,7 +514,161 @@ Observed evidence:
   - IBKR quote snapshot remains blocked until API market-data subscription is
     available;
   - frontend chunk-size warning remains outside this PRD;
-  - FastAPI `on_event` deprecation warnings remain outside this PRD.
+- FastAPI `on_event` deprecation warnings remain outside this PRD.
+
+### G11: Agent News-Driven Backtest And Usage Charts
+
+Status: complete on 2026-06-12.
+
+Outcome:
+
+- A normal Vibe Agent prompt can run the Moirix news workflow without the user
+  manually invoking each tool:
+  - `moirix_status`
+  - `moirix_query_news`
+  - `moirix_build_event_graph`
+  - `moirix_export_event_signal`
+  - `moirix_event_signal_backtest`
+- The resulting run uses Moirix PIT source-lake evidence when available and
+  labels `blocked` / `unavailable` states directly when evidence is not
+  available.
+- The run produces auditable Moirix artifacts under `artifacts/moirix/`:
+  - `status.json`
+  - `request.json`
+  - `coverage_status.json`
+  - `news_evidence.jsonl`
+  - `event_impact_graph.json`
+  - `event_signal.csv`
+  - `event_signal_forward_returns.csv`
+  - `event_signal_backtest_summary.json`
+  - authority artifacts with all live/real-money fields false.
+- AgentLoop provider usage is persisted to `artifacts/llm_usage.json` in the
+  Kenny fork even if the upstream PR is not yet merged.
+- Run Detail shows both:
+  - the existing Moirix Evidence / Graph / Authority views;
+  - an Agent Usage chart that visualizes per-iteration input, output, cache,
+    and total token usage from `llm_usage.iterations`.
+
+Scope:
+
+- Vibe-side routing, skills, prompt guidance, tool contracts, API payloads, run
+  artifacts, and frontend Run Detail rendering.
+- One local SSD-backed smoke run using the existing Moirix checkout and source
+  lake.
+- Optional local MiniMax-M3 usage for the Agent smoke, using the existing
+  provider configuration.
+
+Out of scope:
+
+- Changing Moirix source-lake, graph-truth, portfolio, ledger, broker, or audit
+  state.
+- Routing news through `backtest/loaders`.
+- Adding broker submit, paper submit, live trading, or real-money authority.
+- Claiming PIT evidence when Moirix returns `blocked` or `unavailable`.
+- Pricing/currency cost calculation beyond token usage visualization.
+
+Implementation notes:
+
+- MiniMax-M3 standard-mode local Agent runs use the official MiniMax
+  Anthropic-compatible Messages endpoint:
+  `https://api.minimaxi.com/anthropic`.
+- Because Vibe's previous MiniMax path used `ChatOpenAI`, the `/anthropic`
+  endpoint required a small local Messages adapter instead of reusing the
+  OpenAI-compatible `/chat/completions` client.
+- MiniMax provider usage includes `cache_read_input_tokens`; Vibe persists it
+  separately in `artifacts/llm_usage.json` and renders it as a cache segment in
+  Run Detail.
+
+Verification:
+
+```bash
+git diff --check
+
+uv run --extra dev python -m pytest agent/tests/test_moirix_adapter_tools.py -q
+
+uv run --extra dev python -m pytest \
+  agent/tests/test_agent_loop_terminal_state.py \
+  agent/tests/test_run_card.py -q
+
+cd frontend && npm run build
+cd frontend && npm run test:run -- src/lib/__tests__/runReports.test.ts
+```
+
+Smoke acceptance:
+
+- one Agent-triggered run, not a direct manual backtest, creates a run directory
+  with:
+  - `artifacts/moirix/news_evidence.jsonl` or explicit blocked/unavailable
+    coverage artifacts;
+  - `artifacts/moirix/event_impact_graph.json` when evidence is available;
+  - `artifacts/moirix/event_signal.csv` when evidence is available;
+  - `artifacts/moirix/event_signal_forward_returns.csv` or an explicit blocked
+    forward-return reason;
+  - `artifacts/llm_usage.json`;
+  - no broker/order/live-trading artifact.
+- Run Detail for that run displays Moirix Evidence / Graph / Authority tabs and
+  an Agent Usage token chart.
+
+Observed completion evidence:
+
+- Agent-triggered smoke run:
+  `agent/runs/20260612_165913_06_2efc6e`.
+- Tool sequence in `trace.jsonl`:
+  - `moirix_status`
+  - `moirix_query_news`
+  - `moirix_build_event_graph`
+  - `moirix_export_event_signal`
+  - `moirix_event_signal_backtest`
+- Artifact counts:
+  - `news_evidence.jsonl`: 27 rows
+  - `event_signal.csv`: 27 signal rows plus header
+  - `event_signal_forward_returns.csv`: 135 forward-return rows plus header
+- `event_signal_backtest_summary.json`:
+  - `status=ok`
+  - `signal_count=27`
+  - `forward_return_row_count=135`
+  - horizons `[1, 3, 5, 10, 20]`
+  - `evidence_tiers.pit_source_lake=27`
+  - `missing_price_symbols=[]`
+  - `blockers=[]`
+- `authority_status.json` keeps:
+  - `live_broker_execution_enabled=false`
+  - `real_order_authority=false`
+  - `broker_submit_supported=false`
+  - `ready_for_real_money_trading_authority=false`
+- `artifacts/llm_usage.json`:
+  - `provider=minimax`
+  - `model=MiniMax-M3`
+  - `calls=6`
+  - `input_tokens=40251`
+  - `output_tokens=1689`
+  - `cache_read_input_tokens=117504`
+  - `total_tokens=159444`
+- API verification against the current working tree returned both
+  `llm_usage` and `moirix_artifacts` for the run.
+- Browser verification at
+  `http://127.0.0.1:5901/runs/20260612_165913_06_2efc6e` showed:
+  - Agent Usage chart with Input / Output / Cache series;
+  - Moirix Evidence tab content;
+  - Moirix Graph tab content with candidate graph state;
+  - Moirix Authority tab with broker and real-money authority fields false.
+
+Caveat from the smoke:
+
+- The NVDA smoke exercised the full PIT workflow, but the returned GDELT rows
+  were low-confidence candidate matches around `nvdaily.com` rather than
+  validated NVIDIA-specific news. This is an evidence-quality result to surface,
+  not a Vibe integration failure.
+
+Stop if:
+
+- the SSD-backed Moirix source lake or local adapter cannot be opened read-only;
+- Moirix returns blocked/unavailable and no fixture or previously generated
+  evidence can honestly exercise the success path;
+- implementation would require mutating Moirix source-lake, graph truth,
+  broker state, or Vibe market-data loaders;
+- usage metadata is unavailable from the provider and the implementation would
+  need to persist estimated tokens as if they were provider-reported usage.
 
 ## Overall Completion Criteria
 

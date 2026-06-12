@@ -342,6 +342,9 @@ def test_authority_guard_preserves_blocked(
 ) -> None:
     _use_fake_adapter(tmp_path, monkeypatch)
     run_dir = _run_dir(tmp_path, monkeypatch)
+    main_status = run_dir / "artifacts" / "moirix" / "status.json"
+    main_status.parent.mkdir(parents=True, exist_ok=True)
+    main_status.write_text('{"status":"main_graph_ok"}\n', encoding="utf-8")
     proposal = run_dir / "artifacts" / "moirix" / "proposal.json"
     proposal.parent.mkdir(parents=True, exist_ok=True)
     proposal.write_text('{"scope":"live_trading","broker_write":true}\n', encoding="utf-8")
@@ -356,6 +359,12 @@ def test_authority_guard_preserves_blocked(
     assert payload["status"] == "blocked"
     assert "broker_write_requested" in payload["claim_gate"]["blockers"]
     assert STANDARD_MOIRIX_ARTIFACT_KEYS <= set(payload["artifacts"])
+    status_path = Path(payload["artifacts"]["status"])
+    assert status_path.parent.parent == run_dir / "artifacts" / "moirix" / "authority_checks"
+    assert status_path.parent.name.startswith("proposal-")
+    for artifact_path in payload["artifacts"].values():
+        assert "/artifacts/moirix/authority_checks/" in artifact_path
+    assert json.loads(main_status.read_text(encoding="utf-8"))["status"] == "main_graph_ok"
 
 
 def test_event_signal_backtest_consumes_signal_and_price_csv(

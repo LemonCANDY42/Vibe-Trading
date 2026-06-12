@@ -83,6 +83,36 @@ If `moirix_query_news` is blocked, Vibe may fall back to `web_search`,
 `read_url`, and the existing `event-driven` CSV workflow, but that output must
 be labeled as ad-hoc web research rather than PIT source-lake evidence.
 
+## Agent News-Driven Backtest Target
+
+The next active Kenny-fork goal is to make the above sequence executable from a
+normal Agent prompt rather than only from manual tool calls. The expected
+Agent-run sequence is:
+
+```text
+Agent prompt
+  -> load moirix-event-graph skill when the request asks for news/event impact
+  -> moirix_status
+  -> moirix_query_news(target, market, as_of, lookback_days)
+  -> moirix_build_event_graph(target, as_of)
+  -> moirix_export_event_signal
+  -> moirix_event_signal_backtest(price_csv_path=explicit_daily_close_csv)
+  -> summarize evidence tier, graph hypothesis, event signal, forward returns,
+     blocked/unavailable states, and authority status
+```
+
+This target must keep the same boundary rules:
+
+- `event_signal.csv` may feed an event-study or strategy signal path, but news
+  must not be routed through `backtest/loaders`;
+- Moirix `blocked` and `unavailable` responses are valid user-visible outputs,
+  not failures to hide;
+- all live-trading, broker-submit, and real-money authority fields stay false;
+- the run should also persist AgentLoop usage under `artifacts/llm_usage.json`
+  and expose it in Run Detail as a per-iteration token-usage chart. Provider
+  cache tokens, when reported, must be persisted separately and rendered as
+  cache usage rather than hidden inside input/output bars.
+
 ## Artifacts
 
 Moirix artifacts live under the current Vibe run directory:
@@ -142,6 +172,11 @@ Implemented in the current Vibe-side V0 branch:
   and `event_signal_backtest_summary.json`;
 - `/runs/{id}` Moirix artifact previews and Run Detail tabs for Evidence,
   Graph, and Authority;
+- `artifacts/llm_usage.json` for normal AgentLoop runs, including MiniMax-M3
+  cache usage when provider-reported;
+- Run Detail Agent Usage chart with input, output, cache, total, and call count;
+- MiniMax-M3 standard mode through the Anthropic-compatible Messages endpoint
+  `https://api.minimaxi.com/anthropic`;
 - three local self-use sample runs documented in
   `wiki/docs/kenny/MOIRIX_SELF_USE_SAMPLE_RUNS.md`:
   - `moirix_sample_us_semiconductor`;

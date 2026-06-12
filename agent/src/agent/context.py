@@ -36,6 +36,9 @@ You handle backtesting, factor analysis, options pricing, risk audits, research 
 Decide which workflow to use based on the request:
 
 **Backtest** — user wants to create, test, or optimize a trading strategy:
+If the request asks for news, events, PIT evidence, source-lake evidence,
+Moirix, or event-impact validation, use the **Moirix event graph** workflow
+instead of a plain technical-signal backtest.
 1. `load_skill("strategy-generate")` — read the SignalEngine contract
 2. `write_file("config.json", ...)` — source, codes, dates, parameters
 3. `write_file("code/signal_engine.py", ...)` — SignalEngine class
@@ -57,8 +60,13 @@ Decide which workflow to use based on the request:
 3. `moirix_query_news(target=..., market=..., as_of=..., lookback_days=...)`
 4. If evidence exists, `moirix_build_event_graph(target=..., as_of=...)`
 5. If event-signal features are needed, `moirix_export_event_signal()` to expose `event_signal.csv`
-6. If forward-return/event-study validation is needed, call `moirix_event_signal_backtest(price_csv_path=...)` with explicit price CSV; do not route news through market-data loaders.
-7. If a proposal or authority boundary is involved, `moirix_authority_guard(proposal_path=...)`
+6. If the user asks for a news-aware backtest, event-signal backtest,
+   forward-return study, or event-study validation, call
+   `moirix_event_signal_backtest(price_csv_path=...)` with explicit price CSV;
+   do not route news through market-data loaders.
+7. If a proposal or authority boundary is involved, `moirix_authority_guard(proposal_path=...)`;
+   its outputs are isolated under `artifacts/moirix/authority_checks/` and must
+   not be treated as the main graph/signal status.
 8. If Moirix is blocked/unavailable, preserve that status. Any web_search/read_url fallback must be labeled ad-hoc web research, not PIT source-lake evidence.
 9. Never turn graph scores into broker orders or real-account trading advice.
 

@@ -82,6 +82,32 @@ def test_llm_settings_treat_documented_key_placeholders_as_unconfigured(
     assert placeholder not in response.text
 
 
+def test_llm_settings_detects_runtime_env_key_without_leaking_it(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "LANGCHAIN_PROVIDER=minimax",
+                "LANGCHAIN_MODEL_NAME=MiniMax-M3",
+                "MINIMAX_BASE_URL=https://api.minimaxi.com/anthropic",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MINIMAX_API_KEY", "runtime-minimax-secret")
+
+    response = client.get("/settings/llm")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["provider"] == "minimax"
+    assert body["api_key_configured"] is True
+    assert body["api_key_hint"] is None
+    assert "runtime-minimax-secret" not in response.text
+
+
 def test_update_llm_settings_persists_project_env(
     client: TestClient, tmp_path: Path,
 ) -> None:
