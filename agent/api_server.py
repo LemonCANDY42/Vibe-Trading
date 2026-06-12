@@ -122,6 +122,7 @@ class RunResponse(BaseModel):
     artifacts_metrics_csv: Optional[List[Dict[str, Any]]] = Field(None, description="Full metrics rows")
     artifacts_trades_csv: Optional[List[Dict[str, Any]]] = Field(None, description="Full trade rows")
     validation: Optional[Dict[str, Any]] = Field(None, description="Statistical validation results")
+    moirix_artifacts: Optional[Dict[str, Any]] = Field(None, description="Moirix artifact previews")
 
     run_directory: str = Field(..., description="Run directory path")
     run_stage: Optional[str] = Field(None, description="UI-facing run stage")
@@ -1087,12 +1088,13 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
 
     artifacts_dir = run_dir / "artifacts"
     if artifacts_dir.exists():
-        for file_path in artifacts_dir.iterdir():
+        for file_path in sorted(artifacts_dir.rglob("*")):
             if file_path.is_file():
                 file_type = file_path.suffix.lstrip(".")
+                artifact_name = file_path.relative_to(artifacts_dir).as_posix()
                 response.artifacts.append(
                     Artifact(
-                        name=file_path.name,
+                        name=artifact_name,
                         path=str(file_path),
                         type=file_type if file_type else "unknown",
                         size=file_path.stat().st_size,
@@ -1126,6 +1128,8 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
         except (json.JSONDecodeError, OSError):
             pass
 
+    response.moirix_artifacts = _load_moirix_artifact_previews(run_dir)
+
     if response.artifacts_equity_csv:
         filtered_equity = []
         for row in response.artifacts_equity_csv[:1000]:
@@ -1152,6 +1156,73 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
         response.run_logs = analysis.get("run_logs")
 
     return response
+
+
+def _load_moirix_artifact_previews(run_dir: Path) -> Optional[Dict[str, Any]]:
+    moirix_dir = run_dir / "artifacts" / "moirix"
+    if not moirix_dir.is_dir():
+        return None
+
+    payload: Dict[str, Any] = {}
+    json_files = {
+        "status": "status.json",
+        "request": "request.json",
+        "coverage_status": "coverage_status.json",
+        "event_impact_graph": "event_impact_graph.json",
+        "authority_status": "authority_status.json",
+        "moirix_authority_status": "moirix_authority_status.json",
+        "vibe_run_card_patch": "vibe_run_card_patch.json",
+        "event_signal_backtest_summary": "event_signal_backtest_summary.json",
+    }
+    for key, filename in json_files.items():
+        value = _load_json_file(moirix_dir / filename)
+        if value is not None:
+            payload[key] = value
+
+    summary_path = moirix_dir / "moirix_summary.md"
+    if summary_path.is_file():
+        try:
+            payload["moirix_summary_markdown"] = summary_path.read_text(encoding="utf-8")[:20000]
+        except OSError:
+            pass
+
+    news_path = moirix_dir / "news_evidence.jsonl"
+    if news_path.is_file():
+        payload["news_evidence_preview"] = _load_jsonl_preview(news_path, limit=20)
+
+    for key, filename in (
+        ("event_signal_preview", "event_signal.csv"),
+        ("event_signal_forward_returns_preview", "event_signal_forward_returns.csv"),
+    ):
+        path = moirix_dir / filename
+        if path.is_file():
+            payload[key] = _load_csv_to_dict(path, limit=20)
+
+    if not payload:
+        return None
+    payload["artifact_names"] = sorted(path.relative_to(moirix_dir).as_posix() for path in moirix_dir.rglob("*") if path.is_file())
+    return payload
+
+
+def _load_jsonl_preview(path: Path, *, limit: int) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if len(rows) >= limit:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict):
+                    rows.append(value)
+    except OSError:
+        return []
+    return rows
 
 
 # ============================================================================

@@ -373,6 +373,7 @@ export interface RunData {
   artifacts?: ArtifactInfo[];
   run_card?: RunCard;
   validation?: ValidationData;
+  moirix_artifacts?: Record<string, unknown>;
 
   price_series?: Record<string, PriceBar[]>;
   indicator_series?: Record<string, Record<string, IndicatorPoint[]>>;

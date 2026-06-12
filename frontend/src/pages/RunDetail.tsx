@@ -28,7 +28,7 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 
 const rehypePlugins = [rehypeHighlight];
 
-type Tab = "chart" | "trades" | "runCard" | "code" | "validation";
+type Tab = "chart" | "trades" | "runCard" | "code" | "validation" | "moirixEvidence" | "moirixGraph" | "moirixAuthority";
 
 function downloadCsv(filename: string, csvContent: string) {
   const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
@@ -72,11 +72,15 @@ export function RunDetail() {
 
   const hasValidation = !!run?.validation;
   const hasRunCard = !!run?.run_card;
+  const hasMoirix = hasMoirixArtifacts(run);
   const TABS: { id: Tab; label: string; icon: typeof BarChart3; hidden?: boolean }[] = [
     { id: "chart", label: "Chart", icon: BarChart3 },
     { id: "trades", label: "Trades", icon: List },
     { id: "validation", label: "Validation", icon: ShieldCheck, hidden: !hasValidation },
     { id: "runCard", label: "Run Card", icon: FileCheck2, hidden: !hasRunCard },
+    { id: "moirixEvidence", label: "Moirix Evidence", icon: Database, hidden: !hasMoirix },
+    { id: "moirixGraph", label: "Moirix Graph", icon: BarChart3, hidden: !hasMoirix },
+    { id: "moirixAuthority", label: "Moirix Authority", icon: ShieldCheck, hidden: !hasMoirix },
     { id: "code", label: "Code", icon: Code2 },
   ];
 
@@ -177,9 +181,88 @@ export function RunDetail() {
           {tab === "trades" && <TradesTab run={run} />}
           {tab === "validation" && run.validation && <ValidationPanel data={run.validation} />}
           {tab === "runCard" && run.run_card && <RunCardTab card={run.run_card} />}
+          {tab === "moirixEvidence" && <MoirixTab run={run} kind="evidence" />}
+          {tab === "moirixGraph" && <MoirixTab run={run} kind="graph" />}
+          {tab === "moirixAuthority" && <MoirixTab run={run} kind="authority" />}
           {tab === "code" && <CodeTab code={code} />}
         </ErrorBoundary>
       </div>
+    </div>
+  );
+}
+
+function hasMoirixArtifacts(run: RunData | null): boolean {
+  if (!run) return false;
+  if (run.moirix_artifacts && Object.keys(run.moirix_artifacts).length > 0) return true;
+  return (run.artifacts || []).some((artifact) => artifact.name.startsWith("moirix/") || artifact.path.includes("/artifacts/moirix/"));
+}
+
+function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "graph" | "authority" }) {
+  const data = run.moirix_artifacts || {};
+  const artifacts = (run.artifacts || []).filter((artifact) => artifact.name.startsWith("moirix/") || artifact.path.includes("/artifacts/moirix/"));
+  if (Object.keys(data).length === 0 && artifacts.length === 0) {
+    return <div className="p-8 text-sm text-muted-foreground">No Moirix artifacts recorded.</div>;
+  }
+
+  if (kind === "evidence") {
+    return (
+      <div className="p-4 space-y-4">
+        {typeof data.moirix_summary_markdown === "string" && (
+          <RunCardPanel title="Summary" icon={FileCheck2}>
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown rehypePlugins={rehypePlugins}>{data.moirix_summary_markdown}</ReactMarkdown>
+            </div>
+          </RunCardPanel>
+        )}
+        <div className="grid gap-4 xl:grid-cols-2">
+          <RunCardPanel title="Status" icon={Database}>
+            <JsonBlock value={data.status} />
+          </RunCardPanel>
+          <RunCardPanel title="Coverage" icon={ShieldCheck}>
+            <JsonBlock value={data.coverage_status} />
+          </RunCardPanel>
+        </div>
+        <RunCardPanel title="News Evidence Preview" icon={List}>
+          <PreviewTable value={data.news_evidence_preview} empty="No news evidence preview recorded." />
+        </RunCardPanel>
+      </div>
+    );
+  }
+
+  if (kind === "graph") {
+    return (
+      <div className="p-4 space-y-4">
+        <RunCardPanel title="Event Impact Graph" icon={BarChart3}>
+          <JsonBlock value={data.event_impact_graph} />
+        </RunCardPanel>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <RunCardPanel title="Event Signal Preview" icon={Database}>
+            <PreviewTable value={data.event_signal_preview} empty="No event signal preview recorded." />
+          </RunCardPanel>
+          <RunCardPanel title="Forward Returns Preview" icon={BarChart3}>
+            <PreviewTable value={data.event_signal_forward_returns_preview} empty="No forward-return preview recorded." />
+          </RunCardPanel>
+        </div>
+        <RunCardPanel title="Event Signal Study" icon={FileCheck2}>
+          <JsonBlock value={data.event_signal_backtest_summary} />
+        </RunCardPanel>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 space-y-4">
+      <div className="grid gap-4 xl:grid-cols-2">
+        <RunCardPanel title="Authority Status" icon={ShieldCheck}>
+          <JsonBlock value={data.authority_status || data.moirix_authority_status} />
+        </RunCardPanel>
+        <RunCardPanel title="Run Card Patch" icon={FileCheck2}>
+          <JsonBlock value={data.vibe_run_card_patch} />
+        </RunCardPanel>
+      </div>
+      <RunCardPanel title="Moirix Artifact Manifest" icon={Database}>
+        <PreviewTable value={(data.artifact_names as string[] | undefined)?.map((name) => ({ artifact: name }))} empty="No Moirix artifact manifest recorded." />
+      </RunCardPanel>
     </div>
   );
 }
@@ -263,6 +346,50 @@ function RunCardTab({ card }: { card: RunCard }) {
           <p className="text-sm text-muted-foreground">No artifact checksums recorded.</p>
         )}
       </RunCardPanel>
+    </div>
+  );
+}
+
+function JsonBlock({ value }: { value: unknown }) {
+  if (value === undefined || value === null || value === "") {
+    return <p className="text-sm text-muted-foreground">Not recorded.</p>;
+  }
+  return (
+    <pre className="max-h-[32rem] overflow-auto rounded-md bg-muted/40 p-3 text-xs leading-relaxed">
+      {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+    </pre>
+  );
+}
+
+function PreviewTable({ value, empty }: { value: unknown; empty: string }) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return <p className="text-sm text-muted-foreground">{empty}</p>;
+  }
+  const rows = value.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null && !Array.isArray(row));
+  if (rows.length === 0) {
+    return <p className="text-sm text-muted-foreground">{empty}</p>;
+  }
+  const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))].slice(0, 10);
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-muted-foreground">
+            {columns.map((column) => <th key={column} className="py-2 pr-4">{column}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 20).map((row, index) => (
+            <tr key={index} className="border-b last:border-0">
+              {columns.map((column) => (
+                <td key={column} className="max-w-80 truncate py-2 pr-4 align-top font-mono text-xs">
+                  {formatRunCardValue(row[column])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

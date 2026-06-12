@@ -631,6 +631,194 @@ def read_file(path: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Optional Moirix and IBKR readiness tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool
+def moirix_status(timeout_seconds: int = 120) -> str:
+    """Check the optional local Moirix adapter status and authority boundary.
+
+    Args:
+        timeout_seconds: Adapter subprocess timeout in seconds.
+    """
+    registry = _get_registry()
+    return registry.execute("moirix_status", {"timeout_seconds": timeout_seconds})
+
+
+@mcp.tool
+def moirix_query_news(
+    target: str,
+    market: str,
+    as_of: str,
+    run_dir: str,
+    lookback_days: int = 30,
+    timeout_seconds: int = 120,
+) -> str:
+    """Query Moirix PIT news evidence into a Vibe run artifact directory.
+
+    Args:
+        target: Target symbol, instrument, or search target.
+        market: Market label such as US, HK, or CN.
+        as_of: Point-in-time cutoff date/time.
+        run_dir: Vibe run directory where artifacts/moirix will be written.
+        lookback_days: Calendar-day lookback window.
+        timeout_seconds: Adapter subprocess timeout in seconds.
+    """
+    registry = _get_registry()
+    return registry.execute(
+        "moirix_query_news",
+        {
+            "target": target,
+            "market": market,
+            "as_of": as_of,
+            "run_dir": run_dir,
+            "lookback_days": lookback_days,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
+
+
+@mcp.tool
+def moirix_build_event_graph(
+    target: str,
+    as_of: str,
+    run_dir: str,
+    input_path: str | None = None,
+    timeout_seconds: int = 120,
+) -> str:
+    """Build a Moirix candidate event-impact graph from run evidence.
+
+    Args:
+        target: Target symbol or instrument.
+        as_of: Point-in-time cutoff date/time.
+        run_dir: Vibe run directory containing/writing artifacts/moirix.
+        input_path: Optional input evidence JSON/JSONL path.
+        timeout_seconds: Adapter subprocess timeout in seconds.
+    """
+    payload: dict[str, Any] = {
+        "target": target,
+        "as_of": as_of,
+        "run_dir": run_dir,
+        "timeout_seconds": timeout_seconds,
+    }
+    if input_path:
+        payload["input_path"] = input_path
+    registry = _get_registry()
+    return registry.execute("moirix_build_event_graph", payload)
+
+
+@mcp.tool
+def moirix_export_event_signal(run_dir: str, timeout_seconds: int = 120) -> str:
+    """Export Moirix event_signal.csv as a Vibe run artifact.
+
+    Args:
+        run_dir: Vibe run directory containing/writing artifacts/moirix.
+        timeout_seconds: Adapter subprocess timeout in seconds.
+    """
+    registry = _get_registry()
+    return registry.execute(
+        "moirix_export_event_signal",
+        {"run_dir": run_dir, "timeout_seconds": timeout_seconds},
+    )
+
+
+@mcp.tool
+def moirix_event_signal_backtest(
+    run_dir: str,
+    event_signal_path: str | None = None,
+    price_csv_path: str | None = None,
+    horizons: list[int] | None = None,
+) -> str:
+    """Run an explicit-price forward-return study for Moirix event signals.
+
+    Args:
+        run_dir: Vibe run directory containing/writing artifacts/moirix.
+        event_signal_path: Optional event_signal.csv path.
+        price_csv_path: Optional daily close CSV path.
+        horizons: Forward-return horizons in trading rows.
+    """
+    payload: dict[str, Any] = {"run_dir": run_dir}
+    if event_signal_path:
+        payload["event_signal_path"] = event_signal_path
+    if price_csv_path:
+        payload["price_csv_path"] = price_csv_path
+    if horizons:
+        payload["horizons"] = horizons
+    registry = _get_registry()
+    return registry.execute("moirix_event_signal_backtest", payload)
+
+
+@mcp.tool
+def moirix_authority_guard(proposal_path: str, run_dir: str, timeout_seconds: int = 120) -> str:
+    """Check a proposal through Moirix's fail-closed authority guard.
+
+    Args:
+        proposal_path: Proposal JSON path under the current run or allowed root.
+        run_dir: Vibe run directory containing/writing artifacts/moirix.
+        timeout_seconds: Adapter subprocess timeout in seconds.
+    """
+    registry = _get_registry()
+    return registry.execute(
+        "moirix_authority_guard",
+        {"proposal_path": proposal_path, "run_dir": run_dir, "timeout_seconds": timeout_seconds},
+    )
+
+
+@mcp.tool
+def ibkr_paper_readiness(
+    run_dir: str,
+    connection: str | None = None,
+    host: str | None = None,
+    port: int | None = None,
+    client_id: int | None = None,
+    account: str | None = None,
+    symbol: str = "AAPL",
+    exchange: str = "SMART",
+    currency: str = "USD",
+    sec_type: str = "STK",
+    duration: str = "5 D",
+    bar_size: str = "1 day",
+    what_to_show: str = "TRADES",
+    use_rth: bool = True,
+) -> str:
+    """Write a read-only IBKR paper readiness report.
+
+    Args:
+        run_dir: Vibe run directory where artifacts/ibkr will be written.
+        connection: Optional IBKR paper local profile id.
+        host: Optional local TWS/Gateway host override.
+        port: Optional local TWS/Gateway port override.
+        client_id: Optional API client id. Client id 0 is rejected.
+        account: Optional account filter.
+        symbol: Symbol used for market/historical data checks.
+        exchange: Exchange routing.
+        currency: Contract currency.
+        sec_type: Security type.
+        duration: Historical duration string.
+        bar_size: Historical bar size.
+        what_to_show: Historical data type.
+        use_rth: Use regular trading hours for historical bars.
+    """
+    payload = _trading_common_args(connection=connection, host=host, port=port, client_id=client_id, account=account)
+    payload.update(
+        {
+            "run_dir": run_dir,
+            "symbol": symbol,
+            "exchange": exchange,
+            "currency": currency,
+            "sec_type": sec_type,
+            "duration": duration,
+            "bar_size": bar_size,
+            "what_to_show": what_to_show,
+            "use_rth": use_rth,
+        }
+    )
+    registry = _get_registry()
+    return registry.execute("ibkr_paper_readiness", payload)
+
+
+# ---------------------------------------------------------------------------
 # Trading connector tools
 # ---------------------------------------------------------------------------
 

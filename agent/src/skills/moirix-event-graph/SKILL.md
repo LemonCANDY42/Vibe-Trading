@@ -17,10 +17,15 @@ sector, ETF, or related assets.
    `lookback_days` to request PIT-valid evidence from Moirix.
 3. If evidence is available, call `moirix_build_event_graph` to produce
    `event_impact_graph.json` and related Moirix artifacts.
-4. Convert the graph output into hypotheses, impacted-instrument paths,
+4. If event features are needed, call `moirix_export_event_signal` to expose
+   `event_signal.csv` under `artifacts/moirix/`.
+5. If the user asks for forward returns or event-study validation, call
+   `moirix_event_signal_backtest` with an explicit daily close price CSV.
+   Treat forward returns as outcome labels, not features visible at `known_at`.
+6. Convert the graph output into hypotheses, impacted-instrument paths,
    coverage gaps, and possible event CSV or factor candidates for later Vibe
    backtesting.
-5. State the authority boundary: graph scores are research hypotheses, not
+7. State the authority boundary: graph scores are research hypotheses, not
    direct trading orders.
 
 ## Labels
@@ -38,6 +43,8 @@ sector, ETF, or related assets.
 
 - Do not turn graph scores into direct orders.
 - Do not call broker, order, custody, or live-trading tools from this workflow.
+- Do not route news through market-data loaders; `moirix_event_signal_backtest`
+  consumes `event_signal.csv` and explicit price CSV artifacts only.
 - Do not claim historical or real-time news coverage unless Moirix returns
   coverage evidence for the requested window.
 - Do not write outside the current run artifacts. Moirix tool outputs belong

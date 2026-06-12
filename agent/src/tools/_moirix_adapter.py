@@ -85,6 +85,46 @@ def resolve_news_input(input_path: str | None, run_dir: str) -> tuple[Path | Non
     return resolved, None
 
 
+def resolve_adapter_input(
+    input_path: str | None,
+    run_dir: str,
+    *,
+    default_relative: str | None = None,
+    blocker_prefix: str = "moirix_adapter_input",
+) -> tuple[Path | None, dict[str, Any] | None]:
+    """Resolve an adapter input path inside the run or allowed import roots."""
+    run_root = safe_run_dir(run_dir)
+    if not input_path and default_relative:
+        default_path = safe_path(default_relative, run_root)
+        if default_path.exists():
+            return default_path, None
+        return None, _error_payload(
+            f"{blocker_prefix}_missing",
+            f"{default_relative} was not found under the current run directory.",
+        )
+    if not input_path:
+        return None, _error_payload(f"{blocker_prefix}_missing", "input_path is required")
+
+    try:
+        resolved = safe_path(input_path, run_root)
+        if resolved.exists():
+            return resolved, None
+    except ValueError:
+        resolved = None
+
+    try:
+        resolved = safe_user_path(input_path)
+    except ValueError as exc:
+        return None, _error_payload(f"{blocker_prefix}_rejected", str(exc))
+
+    if not resolved.exists():
+        return None, _error_payload(
+            f"{blocker_prefix}_missing",
+            f"input_path {input_path!r} does not exist under allowed roots",
+        )
+    return resolved, None
+
+
 def call_adapter(args: list[str], *, out_dir: Path | None = None, timeout_seconds: int = 120) -> dict[str, Any]:
     """Call the Moirix adapter and parse its JSON stdout."""
     command = _resolve_adapter_command()

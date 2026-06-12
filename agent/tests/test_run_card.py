@@ -149,6 +149,36 @@ def test_api_run_response_includes_run_card(tmp_path: Path) -> None:
     assert response.run_card == run_card
 
 
+def test_api_run_response_surfaces_moirix_artifact_previews(tmp_path: Path) -> None:
+    import api_server
+
+    run_dir = tmp_path / "run_moirix"
+    moirix_dir = run_dir / "artifacts" / "moirix"
+    moirix_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text('{"status": "success"}\n', encoding="utf-8")
+    (moirix_dir / "status.json").write_text('{"status":"ok"}\n', encoding="utf-8")
+    (moirix_dir / "coverage_status.json").write_text('{"coverage":{"row_count":1}}\n', encoding="utf-8")
+    (moirix_dir / "authority_status.json").write_text(
+        '{"authority":{"ready_for_real_money_trading_authority":false}}\n',
+        encoding="utf-8",
+    )
+    (moirix_dir / "moirix_summary.md").write_text("# Moirix\n\nStatus: `ok`\n", encoding="utf-8")
+    (moirix_dir / "event_signal.csv").write_text(
+        "known_at,symbol,event_type,pit_valid\n2025-01-02,NVDA,fixture,true\n",
+        encoding="utf-8",
+    )
+
+    response = api_server._build_response_from_run_dir(run_dir, elapsed=0.0)
+
+    artifact_names = {artifact.name for artifact in response.artifacts}
+    assert "moirix/status.json" in artifact_names
+    assert "moirix/event_signal.csv" in artifact_names
+    assert response.moirix_artifacts is not None
+    assert response.moirix_artifacts["status"]["status"] == "ok"
+    assert response.moirix_artifacts["event_signal_preview"][0]["symbol"] == "NVDA"
+    assert response.moirix_artifacts["moirix_summary_markdown"].startswith("# Moirix")
+
+
 def test_runner_artifact_spec_surfaces_run_card_paths() -> None:
     runner = Runner()
 

@@ -118,6 +118,41 @@ contract and adds independent review evidence:
 Check both top-level and nested authority fields from adapter payloads. Any
 true real-money or broker-submit authority field must fail closed.
 
+### 5.1 IBKR Paper Read-Only Discipline
+
+The logged-in IB Gateway paper account may be used only for read-only readiness
+checks unless a later PRD explicitly authorizes a paper-order workflow.
+Use `ibkr_paper_readiness` as the standard readiness artifact path; do not
+compose ad-hoc order or cancel API calls for this purpose.
+
+Gateway state does not grant project authority. If IB Gateway has "Read-Only
+API" disabled, treat the environment as capable of broker writes and enforce
+read-only behavior in the Vibe/Moirix code path.
+
+Allowed in the current PRD:
+
+- connectivity checks;
+- account summary reads;
+- positions reads;
+- open orders inspection;
+- executions/history inspection;
+- market-data permission checks;
+- historical-data permission checks.
+
+Forbidden in the current PRD:
+
+- `placeOrder`;
+- `cancelOrder`;
+- `reqGlobalCancel`;
+- order transmit;
+- simulated submit;
+- live submit;
+- any helper that lets event graph confidence become a broker write.
+
+Avoid API client-id behavior that binds, modifies, cancels, or otherwise
+changes manually entered orders. If a read-only check cannot be implemented
+without such behavior, return `blocked` and document the blocker.
+
 ### 6. Label Evidence Precisely
 
 Moirix PIT source-lake evidence, provider API evidence, ad-hoc web research,
@@ -192,7 +227,8 @@ Allowed:
 
 Deferred:
 
-- `moirix_export_event_signal` until adapter `export-event-signal` is stable;
+- `moirix_export_event_signal` until adapter `export-vibe-artifacts` can expose
+  or copy `event_signal.csv` under the frozen contract;
 - `moirix_authority_guard` until adapter `authority-check` is stable;
 - frontend Moirix panels;
 - IBKR paper read-only readiness;

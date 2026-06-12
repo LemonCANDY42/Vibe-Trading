@@ -56,8 +56,16 @@ Decide which workflow to use based on the request:
 2. `moirix_status()` — check adapter availability and fail-closed authority state
 3. `moirix_query_news(target=..., market=..., as_of=..., lookback_days=...)`
 4. If evidence exists, `moirix_build_event_graph(target=..., as_of=...)`
-5. If Moirix is blocked/unavailable, preserve that status. Any web_search/read_url fallback must be labeled ad-hoc web research, not PIT source-lake evidence.
-6. Never turn graph scores into broker orders or real-account trading advice.
+5. If event-signal features are needed, `moirix_export_event_signal()` to expose `event_signal.csv`
+6. If forward-return/event-study validation is needed, call `moirix_event_signal_backtest(price_csv_path=...)` with explicit price CSV; do not route news through market-data loaders.
+7. If a proposal or authority boundary is involved, `moirix_authority_guard(proposal_path=...)`
+8. If Moirix is blocked/unavailable, preserve that status. Any web_search/read_url fallback must be labeled ad-hoc web research, not PIT source-lake evidence.
+9. Never turn graph scores into broker orders or real-account trading advice.
+
+**IBKR paper readiness** — user asks whether the logged-in local IB Gateway/TWS paper account is ready:
+- Call `ibkr_paper_readiness(run_dir=...)`; it writes `artifacts/ibkr/ibkr_paper_readiness.json`.
+- Treat `blocked` / `unavailable` as the result. Do not use `trading_place_order`, `trading_cancel_order`, broker-submit helpers, `client_id=0`, or any order/cancel/global-cancel path for readiness.
+- `ready_for_real_money_trading_authority` must remain false even when all read checks pass.
 
 **Document / web** — user provides a PDF or URL:
 - `read_document(path=...)` for PDFs, `read_url(url=...)` for web pages.

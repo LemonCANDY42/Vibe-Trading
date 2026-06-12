@@ -744,7 +744,7 @@ Settings reads are side-effect free: `GET /settings/llm` and `GET /settings/data
 
 ## 🔌 MCP Plugin
 
-Vibe-Trading exposes 39 MCP tools for any MCP-compatible client. Runs as a stdio subprocess — no server setup needed. Core research tools work with zero API keys for HK/US/crypto; trading connector tools use the selected connector profile, and `run_swarm` needs an LLM key.
+Vibe-Trading exposes 43 MCP tools for any MCP-compatible client. Runs as a stdio subprocess — no server setup needed. Core research tools work with zero API keys for HK/US/crypto; trading connector tools use the selected connector profile, and `run_swarm` needs an LLM key.
 
 <details>
 <summary><b>Claude Desktop</b></summary>
@@ -792,13 +792,17 @@ vibe-trading-mcp --transport sse  # SSE for web clients
 
 </details>
 
-**MCP tools exposed (39):** `list_skills`, `load_skill`, `start_research_goal`, `get_research_goal`, `add_goal_evidence`, `update_research_goal_status`, `backtest`, `factor_analysis`, `analyze_options`, `pattern_recognition`, `read_url`, `read_document`, `web_search`, `write_file`, `read_file`, `list_swarm_presets`, `run_swarm`, `get_market_data`, `get_swarm_status`, `get_run_result`, `list_runs`, `reap_stale_runs`, `retry_run`, `analyze_trade_journal`, `extract_shadow_strategy`, `run_shadow_backtest`, `render_shadow_report`, `scan_shadow_signals`, `moirix_status`, `moirix_query_news`, `moirix_build_event_graph`, `trading_connections`, `trading_select_connection`, `trading_check`, `trading_account`, `trading_positions`, `trading_orders`, `trading_quote`, `trading_history`.
+**MCP tools exposed (43):** `list_skills`, `load_skill`, `start_research_goal`, `get_research_goal`, `add_goal_evidence`, `update_research_goal_status`, `backtest`, `factor_analysis`, `analyze_options`, `pattern_recognition`, `read_url`, `read_document`, `web_search`, `write_file`, `read_file`, `list_swarm_presets`, `run_swarm`, `get_market_data`, `get_swarm_status`, `get_run_result`, `list_runs`, `reap_stale_runs`, `retry_run`, `analyze_trade_journal`, `extract_shadow_strategy`, `run_shadow_backtest`, `render_shadow_report`, `scan_shadow_signals`, `moirix_status`, `moirix_query_news`, `moirix_build_event_graph`, `moirix_export_event_signal`, `moirix_event_signal_backtest`, `moirix_authority_guard`, `ibkr_paper_readiness`, `trading_connections`, `trading_select_connection`, `trading_check`, `trading_account`, `trading_positions`, `trading_orders`, `trading_quote`, `trading_history`.
 
 Optional local Moirix integration is research-only. The Moirix tools call a local
 `moirix_vibe_adapter` process for PIT news evidence and candidate event-impact
-graphs, write outputs under the current run's `artifacts/moirix/`, and preserve
-`blocked` / `unavailable` states instead of fabricating source-lake coverage.
-Set `MOIRIX_ADAPTER_CMD` or see the fork docs under
+graphs, event-signal CSV export, explicit-price forward-return studies, and
+authority-boundary checks. Outputs are
+written under the current run's `artifacts/moirix/`, and `blocked` /
+`unavailable` states are preserved instead of fabricating source-lake coverage.
+`moirix_event_signal_backtest` consumes `event_signal.csv` plus an explicit
+daily close price CSV; it does not route news through market-data loaders. Set
+`MOIRIX_ADAPTER_CMD` or see the fork docs under
 `wiki/docs/kenny/PRD_PERSONAL_VIBE_MOIRIX_FORK.md`,
 `wiki/docs/kenny/CURRENT_GOAL.md`, and
 `wiki/docs/moirix/MOIRIX_EXTENSION_PLAN.md` for local checkout discovery and
@@ -952,11 +956,13 @@ Default local ports:
 | TWS | `7497` | `7496` |
 | IB Gateway | `4002` | `4001` |
 
-The agent exposes connector-scoped tools named `trading_connections`,
-`trading_select_connection`, `trading_check`, `trading_account`,
-`trading_positions`, `trading_orders`, `trading_quote`, and `trading_history`.
+The agent exposes connector-scoped tools named `ibkr_paper_readiness`,
+`trading_connections`, `trading_select_connection`, `trading_check`,
+`trading_account`, `trading_positions`, `trading_orders`, `trading_quote`, and
+`trading_history`.
 Live-broker raw MCP tools are not registered directly as `mcp_<broker>_*`.
-No IBKR order-placement tool is registered.
+`ibkr_paper_readiness` writes `artifacts/ibkr/ibkr_paper_readiness.json` and
+uses only read APIs. No IBKR order-placement tool is registered.
 
 ### Config reference
 
@@ -1028,7 +1034,7 @@ Vibe-Trading/
 ├── agent/                          # Backend (Python)
 │   ├── cli/                        # CLI package — interactive TUI + subcommands
 │   ├── api_server.py               # FastAPI server — runs, sessions, upload, swarm, SSE
-│   ├── mcp_server.py               # MCP server — 36 tools for OpenClaw / Claude Desktop
+│   ├── mcp_server.py               # MCP server — 43 tools for OpenClaw / Claude Desktop
 │   │
 │   ├── src/
 │   │   ├── agent/                  # ReAct agent core
@@ -1043,7 +1049,7 @@ Vibe-Trading/
 │   │   ├── memory/                 # Cross-session persistent memory
 │   │   │   └── persistent.py       #   file-based memory (~/.vibe-trading/memory/)
 │   │   │
-│   │   ├── tools/                  # 31 auto-discovered agent tools
+│   │   ├── tools/                  # 55 auto-discovered local agent tools
 │   │   │   ├── backtest_tool.py    #   run backtests
 │   │   │   ├── remember_tool.py    #   cross-session memory (save/recall/forget)
 │   │   │   ├── skill_writer_tool.py #  skill CRUD (save/patch/delete/file)

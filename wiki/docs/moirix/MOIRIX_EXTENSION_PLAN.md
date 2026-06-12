@@ -8,6 +8,28 @@ The product roadmap source is
 `wiki/docs/kenny/PRD_PERSONAL_VIBE_MOIRIX_FORK.md`. The current bounded target
 is tracked in `wiki/docs/kenny/CURRENT_GOAL.md`.
 
+## G1 Contract Freeze
+
+The adopted adapter command contract is:
+
+```text
+status
+query-news
+build-event-graph
+export-vibe-artifacts
+authority-check
+```
+
+`export-vibe-artifacts` is the canonical Moirix-side export command for Vibe.
+It owns the Vibe artifact bundle, including `event_signal.csv` when the event
+signal artifact exists. The Vibe-side tool may still be named
+`moirix_export_event_signal` because that is the user-facing workflow action,
+but it must call `export-vibe-artifacts` unless a future Moirix adapter version
+adds an explicit compatible `export-event-signal` alias.
+
+This resolves the PRD wording that mentioned `export-event-signal` against the
+current Moirix implementation and docs, which expose `export-vibe-artifacts`.
+
 ## Boundary
 
 Vibe owns:
@@ -67,9 +89,14 @@ Moirix artifacts live under the current Vibe run directory:
 
 ```text
 artifacts/moirix/
+  status.json
+  request.json
+  coverage_status.json
   news_evidence.jsonl
   event_impact_graph.json
+  event_signal.csv
   moirix_summary.md
+  authority_status.json
   moirix_authority_status.json
   vibe_run_card_patch.json
 ```
@@ -100,25 +127,50 @@ Implemented in the current Vibe-side V0 branch:
 - `moirix_status`;
 - `moirix_query_news`;
 - `moirix_build_event_graph`;
+- `moirix_export_event_signal`;
+- `moirix_event_signal_backtest`;
+- `moirix_authority_guard`;
 - `moirix-event-graph` skill;
 - `moirix_event_impact_desk` swarm preset;
 - run artifact writes under `artifacts/moirix/`;
+- standard Moirix artifact manifest under `artifacts/moirix/`, including
+  `status.json`, `request.json`, `coverage_status.json`,
+  `authority_status.json`, `moirix_authority_status.json`, and
+  `vibe_run_card_patch.json`;
+- explicit-price event-signal forward-return study through
+  `moirix_event_signal_backtest`, writing `event_signal_forward_returns.csv`
+  and `event_signal_backtest_summary.json`;
+- `/runs/{id}` Moirix artifact previews and Run Detail tabs for Evidence,
+  Graph, and Authority;
+- three local self-use sample runs documented in
+  `wiki/docs/kenny/MOIRIX_SELF_USE_SAMPLE_RUNS.md`:
+  - `moirix_sample_us_semiconductor`;
+  - `moirix_sample_hk_tech`;
+  - `moirix_sample_cn_policy`;
+- IBKR paper read-only readiness through `ibkr_paper_readiness`, with local
+  artifact `artifacts/ibkr/ibkr_paper_readiness.json` and no order/cancel path;
 - fail-closed handling for missing adapter, blocked adapter, invalid JSON,
   unknown status, authority contract violations, and artifact paths outside the
   current run artifact directory.
 
-Deferred until the Moirix adapter exposes stable commands:
+Implemented in the local Moirix adapter for G2:
 
-- `moirix_export_event_signal` wrapping `export-event-signal`;
-- `moirix_authority_guard` wrapping `authority-check`;
-- `event_signal.csv` handoff into Vibe backtest workflows.
+- `status`;
+- `query-news`;
+- `build-event-graph`;
+- `export-vibe-artifacts`;
+- `authority-check`;
+- `build-event-graph` writes `event_signal.csv` from visible evidence rows;
+- `export-vibe-artifacts` copies `event_signal.csv` when present;
+- adapter commands that write artifacts also write standard status, request,
+  coverage, authority, summary, and Run Card patch files;
+- broker-write proposals are blocked by `authority-check`.
 
-Deferred to later Vibe-side work:
+Deferred Vibe-side work:
 
-- Run Detail Moirix Evidence / Event Graph / Authority panels;
-- IBKR paper read-only readiness;
 - paper proposal guard integration;
 - any broker-submit or real-money authority path.
+
 
 ## Acceptance Criteria
 
