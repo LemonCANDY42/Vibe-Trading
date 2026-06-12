@@ -163,6 +163,85 @@ def test_api_run_response_includes_run_card(tmp_path: Path) -> None:
     assert response.llm_usage == llm_usage
 
 
+def test_api_list_runs_can_include_compact_llm_usage(tmp_path: Path, monkeypatch) -> None:
+    import api_server
+    from fastapi.testclient import TestClient
+
+    runs_dir = tmp_path / "runs"
+    run_dir = runs_dir / "20260612_164752_53_c52ef4"
+    artifacts_dir = run_dir / "artifacts"
+    artifacts_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text('{"status": "success"}\n', encoding="utf-8")
+    usage = {
+        "schema_version": "0.1",
+        "provider": "minimax",
+        "model": "MiniMax-M3",
+        "input_tokens": 100,
+        "output_tokens": 20,
+        "total_tokens": 120,
+        "calls": 2,
+    }
+    (artifacts_dir / "llm_usage.json").write_text(json.dumps(usage), encoding="utf-8")
+    monkeypatch.setattr(api_server, "RUNS_DIR", runs_dir)
+    monkeypatch.delenv("API_AUTH_KEY", raising=False)
+    monkeypatch.setattr(api_server, "_API_KEY", "")
+
+    client = TestClient(api_server.app, client=("127.0.0.1", 50000))
+    response = client.get("/runs?limit=100&with_usage=true")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert rows[0]["run_id"] == "20260612_164752_53_c52ef4"
+    assert rows[0]["llm_usage"]["provider"] == "minimax"
+    assert rows[0]["llm_usage"]["total_tokens"] == 120
+
+
+def test_api_run_response_filters_chart_payload_by_symbol(tmp_path: Path) -> None:
+    import api_server
+
+    run_dir = tmp_path / "run_chart_filter"
+    artifacts_dir = run_dir / "artifacts"
+    artifacts_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text('{"status": "success"}\n', encoding="utf-8")
+    (artifacts_dir / "price_series.csv").write_text(
+        "timestamp,code,open,high,low,close,volume\n"
+        "2026-01-01,AAA,1,2,1,2,100\n"
+        "2026-01-02,AAA,2,3,2,3,120\n"
+        "2026-01-01,BBB,4,5,4,5,200\n",
+        encoding="utf-8",
+    )
+    (artifacts_dir / "trades.csv").write_text(
+        "timestamp,code,side,price,qty,reason\n"
+        "2026-01-02,AAA,BUY,3,10,test\n"
+        "2026-01-02,BBB,SELL,5,10,test\n",
+        encoding="utf-8",
+    )
+
+    response = api_server._build_response_from_run_dir(
+        run_dir,
+        elapsed=0.0,
+        include_analysis=True,
+        chart_symbol="AAA",
+    )
+
+    assert response.chart_symbols == ["AAA", "BBB"]
+    assert set(response.price_series or {}) == {"AAA"}
+    assert response.trade_markers == [
+        {
+            "time": "2026-01-02",
+            "timestamp": "2026-01-02",
+            "code": "AAA",
+            "side": "BUY",
+            "price": 3.0,
+            "qty": 10.0,
+            "reason": "test",
+            "text": "BUY AAA",
+        }
+    ]
+    assert response.artifacts_trades_csv is None
+    assert response.artifacts_equity_csv is None
+
+
 def test_api_run_response_surfaces_moirix_artifact_previews(tmp_path: Path) -> None:
     import api_server
 

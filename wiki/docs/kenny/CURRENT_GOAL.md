@@ -686,6 +686,50 @@ Status: complete on 2026-06-12. The PRD is complete because all are true:
 - Upstream sync has been tested and reviewed.
 - `REVIEW_MOIRIX_EXTENSION_COMPLETE.md` has no blocking findings.
 
+## Dashboard Root-Cause Fixes - 2026-06-13
+
+Status: complete for local Kenny fork.
+
+Root causes fixed:
+
+- Agent Usage Dashboard was empty even though `artifacts/llm_usage.json` existed
+  because the running API did not expose usage in `/runs`, and the page depended
+  on full `/runs/{id}` detail scans that were both brittle and expensive.
+- Historical reports had no unified report-library page; users had to discover
+  individual Run Detail URLs from chat/sidebar context.
+- Large Run Detail pages were slow because `/runs/{id}` returned all chart
+  symbols and all trade markers, and the frontend rendered every candlestick
+  chart at once. The observed heavy run
+  `20260613_004035_68_f4a45c` returned about 19.4 MB, 173 symbols, 83,685 bars,
+  and 5,310 markers before the fix.
+
+New local contracts:
+
+- `GET /runs?limit=N&with_usage=true` returns compact `llm_usage` summaries for
+  list/dashboard views.
+- `GET /runs/{run_id}?chart_symbol=SYMBOL` returns chart data for one selected
+  symbol while still returning `chart_symbols` for symbol switching.
+- Run Detail no longer returns full `artifacts_trades_csv` or
+  `artifacts_equity_csv`; it returns bounded preview data and selected-symbol
+  chart payloads.
+- Run Detail defaults to one selected chart, supports manual multi-select, and
+  provides a `Load all` action that loads symbols sequentially with a progress
+  bar and cancel control. It renders loaded charts in small visible batches so a
+  100+ symbol run does not create all chart instances at once.
+
+Observed verification:
+
+- `GET /runs?limit=100&with_usage=true` returns two usage-bearing runs:
+  `20260612_165913_06_2efc6e` and `20260612_164752_53_c52ef4`.
+- `GET /runs/20260613_004035_68_f4a45c` dropped from about 19.4 MB to about
+  295 KB, with 173 available symbols but only one symbol's 484 bars and bounded
+  markers in the default payload.
+- `GET /runs/20260613_004035_68_f4a45c?chart_symbol=000100.SZ` returns only
+  `000100.SZ` chart data.
+- Frontend `/reports` provides the unified Backtest Report Library.
+- Frontend Run Detail tests cover adding a second symbol without replacing the
+  first chart and progressive `Load all` completion.
+
 ## Global Stop Conditions
 
 Stop and ask before continuing if:

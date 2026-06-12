@@ -12,7 +12,7 @@ import {
 import { api, type LLMUsageSummary, type RunData, type RunListItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const USAGE_RUN_SCAN_LIMIT = 25;
+const USAGE_RUN_SCAN_LIMIT = 100;
 const HEAVY_RUN_LIMIT = 8;
 
 export function Usage() {
@@ -26,17 +26,31 @@ export function Usage() {
     else setRefreshing(true);
     setError(null);
     try {
-      const list = await api.listRuns();
+      const list = await api.listRuns({ limit: USAGE_RUN_SCAN_LIMIT, with_usage: true });
       const recent = Array.isArray(list) ? list.slice(0, USAGE_RUN_SCAN_LIMIT) : [];
-      const details = await Promise.allSettled(
-        recent.map(async (run) => [run, await api.getRun(run.run_id)] as const),
-      );
-      const usageRuns = details.flatMap((result) => {
-        if (result.status !== "fulfilled") return [];
-        const [run, detail] = result.value;
-        const usage = toUsageRun(run, detail);
-        return usage ? [usage] : [];
-      });
+      const usageRuns: UsageRun[] = [];
+      const fallbackRuns: RunListItem[] = [];
+
+      for (const run of recent) {
+        const usage = toUsageRun(run);
+        if (usage) usageRuns.push(usage);
+        else fallbackRuns.push(run);
+      }
+
+      // Backward-compatible fallback for older backends or old run rows that
+      // do not include compact usage in /runs. Keep this after the fast path so
+      // the common case does not load full chart/report payloads.
+      if (fallbackRuns.length > 0) {
+        const details = await Promise.allSettled(
+          fallbackRuns.map(async (run) => [run, await api.getRun(run.run_id)] as const),
+        );
+        for (const result of details) {
+          if (result.status !== "fulfilled") continue;
+          const [run, detail] = result.value;
+          const usage = toUsageRun(run, detail);
+          if (usage) usageRuns.push(usage);
+        }
+      }
       setRuns(usageRuns);
     } catch (err) {
       setRuns([]);
@@ -236,8 +250,8 @@ function UsagePill({ label, value }: { label: string; value: string }) {
   );
 }
 
-function toUsageRun(run: RunListItem, detail: RunData): UsageRun | null {
-  const usage = detail.llm_usage;
+function toUsageRun(run: RunListItem, detail?: RunData): UsageRun | null {
+  const usage = run.llm_usage || detail?.llm_usage;
   if (!usage || !hasUsage(usage)) return null;
   const inputTokens = toFiniteNumber(usage.input_tokens);
   const outputTokens = toFiniteNumber(usage.output_tokens);
@@ -245,7 +259,7 @@ function toUsageRun(run: RunListItem, detail: RunData): UsageRun | null {
   return {
     runId: run.run_id,
     createdAt: run.created_at,
-    prompt: run.prompt || detail.prompt,
+    prompt: run.prompt || detail?.prompt,
     provider: stringOrUnknown(usage.provider),
     model: stringOrUnknown(usage.model),
     calls: toFiniteNumber(usage.calls) || countIterations(usage),

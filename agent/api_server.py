@@ -97,6 +97,7 @@ class RunInfo(BaseModel):
     codes: List[str] = Field(default_factory=list)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    llm_usage: Optional[Dict[str, Any]] = Field(None, description="Optional compact persisted LLM usage summary")
 
 
 class RunResponse(BaseModel):
@@ -128,6 +129,7 @@ class RunResponse(BaseModel):
     run_directory: str = Field(..., description="Run directory path")
     run_stage: Optional[str] = Field(None, description="UI-facing run stage")
     run_context: Optional[Dict[str, Any]] = Field(None, description="Normalized request context")
+    chart_symbols: List[str] = Field(default_factory=list, description="Symbols available for chart analysis")
     price_series: Optional[Dict[str, List[Dict[str, Any]]]] = Field(None, description="Grouped OHLC series")
     indicator_series: Optional[Dict[str, Dict[str, List[Dict[str, Any]]]]] = Field(
         None,
@@ -1029,7 +1031,13 @@ def _load_csv_to_dict(path: Path, limit: Optional[int] = None) -> List[Dict[str,
 
 
 
-def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analysis: bool = False) -> RunResponse:
+def _build_response_from_run_dir(
+    run_dir: Path,
+    elapsed: float,
+    *,
+    include_analysis: bool = False,
+    chart_symbol: Optional[str] = None,
+) -> RunResponse:
     """Build a run response from a persisted run directory."""
     run_id = run_dir.name
 
@@ -1105,13 +1113,14 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
                     )
                 )
 
+    equity_rows: Optional[List[Dict[str, Any]]] = None
     equity_path = run_dir / "artifacts" / "equity.csv"
     if equity_path.exists():
-        response.artifacts_equity_csv = _load_csv_to_dict(equity_path)
+        equity_rows = _load_csv_to_dict(equity_path)
 
     metrics_csv_path = run_dir / "artifacts" / "metrics.csv"
     if metrics_csv_path.exists():
-        response.artifacts_metrics_csv = _load_csv_to_dict(metrics_csv_path)
+        response.artifacts_metrics_csv = _load_csv_to_dict(metrics_csv_path, limit=200)
 
     run_card_path = run_dir / "run_card.json"
     if run_card_path.exists():
@@ -1122,9 +1131,10 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
 
     response.llm_usage = _load_json_file(run_dir / "artifacts" / "llm_usage.json")
 
+    trade_rows: Optional[List[Dict[str, Any]]] = None
     trades_path = run_dir / "artifacts" / "trades.csv"
     if trades_path.exists():
-        response.artifacts_trades_csv = _load_csv_to_dict(trades_path)
+        trade_rows = _load_csv_to_dict(trades_path)
 
     validation_path = run_dir / "artifacts" / "validation.json"
     if validation_path.exists():
@@ -1135,9 +1145,9 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
 
     response.moirix_artifacts = _load_moirix_artifact_previews(run_dir)
 
-    if response.artifacts_equity_csv:
+    if equity_rows:
         filtered_equity = []
-        for row in response.artifacts_equity_csv[:1000]:
+        for row in equity_rows[:1000]:
             filtered_row: Dict[str, Any] = {}
             if "timestamp" in row:
                 filtered_row["time"] = row["timestamp"]
@@ -1148,13 +1158,15 @@ def _build_response_from_run_dir(run_dir: Path, elapsed: float, *, include_analy
             filtered_equity.append(filtered_row)
         response.equity_curve = filtered_equity
 
-    if response.artifacts_trades_csv:
-        response.trade_log = response.artifacts_trades_csv[:500]
+    if trade_rows:
+        response.trade_log = trade_rows[:500]
 
     if include_analysis:
-        analysis = build_run_analysis(run_dir)
+        symbols = [chart_symbol] if chart_symbol else None
+        analysis = build_run_analysis(run_dir, symbols=symbols)
         response.run_stage = analysis.get("run_stage")
         response.run_context = analysis.get("run_context")
+        response.chart_symbols = analysis.get("chart_symbols") or []
         response.price_series = analysis.get("price_series")
         response.indicator_series = analysis.get("indicator_series")
         response.trade_markers = analysis.get("trade_markers")
@@ -1336,7 +1348,7 @@ async def get_run_pine(run_id: str):
 
 
 @app.get("/runs/{run_id}", response_model=RunResponse, dependencies=[Depends(require_auth)])
-async def get_run_result(run_id: str):
+async def get_run_result(run_id: str, chart_symbol: Optional[str] = Query(None, description="Optional symbol to include in chart payload")):
     """Fetch full details for a historical run by ``run_id``."""
     _validate_path_param(run_id, "run_id")
     run_dir = RUNS_DIR / run_id
@@ -1347,13 +1359,13 @@ async def get_run_result(run_id: str):
             detail=f"Run {run_id} not found"
         )
 
-    response = _build_response_from_run_dir(run_dir, elapsed=0.0, include_analysis=True)
+    response = _build_response_from_run_dir(run_dir, elapsed=0.0, include_analysis=True, chart_symbol=chart_symbol)
 
     return response
 
 
 @app.get("/runs", response_model=List[RunInfo], dependencies=[Depends(require_auth)])
-async def list_runs(limit: int = 20):
+async def list_runs(limit: int = 20, with_usage: bool = Query(False, description="Include compact llm_usage summaries")):
     """List recent runs with summary fields."""
     limit = min(max(1, limit), 100)
     runs_dir = RUNS_DIR
@@ -1438,6 +1450,8 @@ async def list_runs(limit: int = 20):
                 pass
 
         run_context = load_run_context(d)
+        llm_usage = _load_json_file(d / "artifacts" / "llm_usage.json") if with_usage else None
+
         results.append(RunInfo(
             run_id=run_id,
             status=status_val,
@@ -1448,6 +1462,7 @@ async def list_runs(limit: int = 20):
             codes=run_context.get("codes") or [],
             start_date=run_context.get("start_date"),
             end_date=run_context.get("end_date"),
+            llm_usage=llm_usage,
         ))
 
     return results

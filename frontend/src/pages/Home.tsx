@@ -125,6 +125,13 @@ export function Home() {
               <GitCompare className="h-4 w-4" />
               Compare Runs
             </Link>
+            <Link
+              to="/reports"
+              className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-muted"
+            >
+              <FileText className="h-4 w-4" />
+              Report Library
+            </Link>
           </div>
         </section>
 

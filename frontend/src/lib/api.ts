@@ -73,8 +73,19 @@ function appendQueryParam(url: string, key: string, value: string): string {
 
 export const api = {
   uploadFile,
-  listRuns: () => request<RunListItem[]>("/runs"),
-  getRun: (id: string) => request<RunData>(`/runs/${id}`),
+  listRuns: (params: RunListParams = {}) => {
+    const q = new URLSearchParams();
+    if (params.limit !== undefined) q.set("limit", String(params.limit));
+    if (params.with_usage !== undefined) q.set("with_usage", params.with_usage ? "true" : "false");
+    const qs = q.toString();
+    return request<RunListItem[]>(`/runs${qs ? `?${qs}` : ""}`);
+  },
+  getRun: (id: string, params: RunDetailParams = {}) => {
+    const q = new URLSearchParams();
+    if (params.chart_symbol) q.set("chart_symbol", params.chart_symbol);
+    const qs = q.toString();
+    return request<RunData>(`/runs/${id}${qs ? `?${qs}` : ""}`);
+  },
   getRunCode: (id: string) => request<Record<string, string>>(`/runs/${id}/code`),
   getRunPine: (id: string) => request<PineScriptResult>(`/runs/${id}/pine`),
   listSessions: () => request<SessionItem[]>("/sessions"),
@@ -284,6 +295,16 @@ export interface RunListItem {
   codes?: string[];
   start_date?: string;
   end_date?: string;
+  llm_usage?: LLMUsageSummary | null;
+}
+
+export interface RunListParams {
+  limit?: number;
+  with_usage?: boolean;
+}
+
+export interface RunDetailParams {
+  chart_symbol?: string;
 }
 
 export interface PriceBar {
@@ -368,6 +389,7 @@ export interface RunData {
   run_directory?: string;
   run_stage?: string;
   run_context?: Record<string, unknown>;
+  chart_symbols?: string[];
 
   metrics?: BacktestMetrics;
   artifacts?: ArtifactInfo[];
