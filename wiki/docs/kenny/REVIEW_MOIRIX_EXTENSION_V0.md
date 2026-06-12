@@ -85,9 +85,14 @@ Real local adapter smoke:
 
 ```text
 status ok local_moirix_conda
-query blocked ['source_lake_observed_window_does_not_cover_request']
+query initially blocked on sampled source-lane window coverage
 graph ok /private/tmp/vibe-moirix-review-smoke-run/artifacts/moirix/event_impact_graph.json
 ```
+
+Follow-up verification on 2026-06-12 fixed the sampled-window blocker in the
+sibling Moirix adapter branch. `query-news` now delegates PIT/time/coverage
+blockers to the read-only news-browser query surface, and a 2018-12-14 smoke
+query returned 2 rows before graph/export/backtest tests.
 
 ## Observed Results
 

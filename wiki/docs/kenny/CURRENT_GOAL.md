@@ -42,9 +42,15 @@ The fork already has a pushed V0 foundation on
 
   ```text
   status ok local_moirix_conda
-  query blocked ['source_lake_observed_window_does_not_cover_request']
+  query initially blocked on sampled source-lane window coverage
   graph ok /private/tmp/vibe-moirix-review-smoke-run/artifacts/moirix/event_impact_graph.json
   ```
+
+  That sampled-window blocker was fixed in the sibling Moirix branch on
+  2026-06-12: `query-news` now lets the read-only news-browser query surface
+  decide PIT/time/coverage blockers instead of treating sampled catalog lanes
+  as full coverage proof. The fix was verified with a 2018-12-14 PIT query
+  returning 2 rows.
 
 ## Active Implementation Stages
 
