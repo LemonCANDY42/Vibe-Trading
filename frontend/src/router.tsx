@@ -10,6 +10,9 @@ const RunDetail = lazy(() =>
 const Compare = lazy(() =>
   import("@/pages/Compare").then((m) => ({ default: m.Compare })),
 );
+const Reports = lazy(() =>
+  import("@/pages/Reports").then((m) => ({ default: m.Reports })),
+);
 const Settings = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.Settings })),
 );
@@ -42,6 +45,7 @@ export const router = createBrowserRouter([
     children: [
       { path: "/", element: wrap(Home) },
       { path: "/agent", element: wrap(Agent) },
+      { path: "/reports", element: wrap(Reports) },
       { path: "/settings", element: wrap(Settings) },
       { path: "/runs/:runId", element: wrap(RunDetail) },
       { path: "/compare", element: wrap(Compare) },
