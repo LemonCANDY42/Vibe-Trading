@@ -92,8 +92,10 @@ class MoirixDecisionProjectionTool(BaseTool):
         csv_path = out_dir / "decision_projection.csv"
         json_path = out_dir / "decision_projection.json"
         manifest_path = out_dir / "backtest_projection_manifest.json"
+        signal_engine_path = out_dir / "decision_projection_signal_engine.py"
 
         _write_csv(csv_path, rows)
+        _write_signal_engine_template(signal_engine_path)
         json_payload = {
             "schema_version": SCHEMA_VERSION,
             "status": "ok",
@@ -117,6 +119,15 @@ class MoirixDecisionProjectionTool(BaseTool):
             "artifacts": {
                 "decision_projection_csv": str(csv_path),
                 "decision_projection_json": str(json_path),
+                "decision_projection_signal_engine": str(signal_engine_path),
+            },
+            "vibe_backtest_consumer": {
+                "type": "signal_engine_template",
+                "template_path": str(signal_engine_path),
+                "instructions": (
+                    "Copy or symlink this template as code/signal_engine.py in a Vibe backtest run "
+                    "that also contains artifacts/moirix/decision_projection.csv."
+                ),
             },
             "usage": "Backtest projection only. Not a broker order and not Moirix evidence.",
             "authority": _false_authority(),
@@ -134,6 +145,7 @@ class MoirixDecisionProjectionTool(BaseTool):
                     "decision_projection_csv": str(csv_path),
                     "decision_projection_json": str(json_path),
                     "backtest_projection_manifest": str(manifest_path),
+                    "decision_projection_signal_engine": str(signal_engine_path),
                 },
                 "authority": _false_authority(),
                 "claim_gate": {
@@ -230,6 +242,51 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writerows(rows)
 
 
+def _write_signal_engine_template(path: Path) -> None:
+    path.write_text(
+        '''"""Vibe signal engine template for Moirix decision_projection.csv."""
+
+from pathlib import Path
+
+import pandas as pd
+
+
+PROJECTION_CSV = "artifacts/moirix/decision_projection.csv"
+
+
+class SignalEngine:
+    """Convert research-only Moirix decision projection rows into backtest signals."""
+
+    def generate(self, data_map):
+        projection_path = Path(PROJECTION_CSV)
+        if not projection_path.is_absolute():
+            projection_path = Path(__file__).resolve().parents[1] / projection_path
+        projection = pd.read_csv(projection_path)
+        output = {}
+        for symbol, data in data_map.items():
+            index = pd.to_datetime(data.index)
+            signal = pd.Series(0.0, index=index)
+            rows = projection[projection["symbol"].astype(str).str.upper() == str(symbol).upper()]
+            for _, row in rows.iterrows():
+                start_raw = row.get("window_start") or row.get("known_at")
+                end_raw = row.get("window_end") or row.get("known_at")
+                if not start_raw:
+                    continue
+                start = pd.Timestamp(start_raw)
+                end = pd.Timestamp(end_raw) if end_raw else start
+                side = str(row.get("side") or "").lower()
+                action = str(row.get("action") or "").lower()
+                value = 1.0 if side == "buy" or action in {"buy", "add", "cover"} else 0.0
+                if side == "sell" or action in {"sell", "trim", "exit", "short"}:
+                    value = -1.0
+                signal.loc[(index >= start) & (index <= end)] = value
+            output[symbol] = signal
+        return output
+''',
+        encoding="utf-8",
+    )
+
+
 def _merge_run_card_patch(out_dir: Path) -> None:
     path = out_dir / "vibe_run_card_patch.json"
     existing: dict[str, Any] = {}
@@ -246,6 +303,7 @@ def _merge_run_card_patch(out_dir: Path) -> None:
             "decision_projection_csv": "artifacts/moirix/decision_projection.csv",
             "decision_projection_json": "artifacts/moirix/decision_projection.json",
             "backtest_projection_manifest": "artifacts/moirix/backtest_projection_manifest.json",
+            "decision_projection_signal_engine": "artifacts/moirix/decision_projection_signal_engine.py",
         }
     )
     existing.update(

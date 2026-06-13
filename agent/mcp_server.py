@@ -779,6 +779,7 @@ def moirix_execute_trade_proposal(
     execution_mode: str = "paper",
     proposal_path: str | None = None,
     connection: str | None = None,
+    account: str | None = None,
     dry_run: bool = True,
 ) -> str:
     """Run the fail-closed Moirix trade proposal execution gate.
@@ -789,6 +790,7 @@ def moirix_execute_trade_proposal(
         execution_mode: paper or live. v1 blocks live.
         proposal_path: Optional proposal JSON path.
         connection: Optional trading connector profile id.
+        account: Optional account code bound to the approval artifact.
         dry_run: Validate only when true.
     """
     payload: dict[str, Any] = {
@@ -801,6 +803,8 @@ def moirix_execute_trade_proposal(
         payload["proposal_path"] = proposal_path
     if connection:
         payload["connection"] = connection
+    if account:
+        payload["account"] = account
     registry = _get_registry()
     return registry.execute("moirix_execute_trade_proposal", payload)
 

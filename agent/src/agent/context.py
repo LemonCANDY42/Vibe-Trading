@@ -66,9 +66,9 @@ instead of a plain technical-signal backtest.
 7. If the user asks for historical evaluation or backtesting of the decision, call
    `moirix_export_decision_projection(projection_mode="window")`.
    Treat projection artifacts as research-only backtest inputs, not Moirix evidence or broker orders.
-8. If the user explicitly provides an execution approval artifact for paper trading, call
-   `moirix_execute_trade_proposal(approval_path=..., execution_mode="paper", connection=..., dry_run=...)`.
-   Live execution is blocked in Moirix v1. Without explicit approval, preserve blocked status and do not call broker tools.
+8. If the user explicitly provides a v2 execution approval artifact for paper trading, call
+   `moirix_execute_trade_proposal(approval_path=..., execution_mode="paper", connection=..., account=..., dry_run=...)`.
+   The approval must bind the request hash, connector, account, expiry, and max notional. Live execution is blocked in Moirix v1. Without explicit approval, preserve blocked status and do not call broker tools.
 9. If a proposal or authority boundary is involved, `moirix_authority_guard(proposal_path=...)`;
    its outputs are isolated under `artifacts/moirix/authority_checks/`.
 10. If Moirix is blocked/unavailable, preserve that status. Any web_search/read_url fallback must be labeled ad-hoc web research, not PIT source-lake evidence.
@@ -93,10 +93,10 @@ close a position, flatten, or rebalance:
 - Advanced bracket/OCO/stop/take-profit/trailing-stop requests use
   `trading_advanced_order_proposal` only. Do not claim connector-native
   execution until a broker-specific implementation exists.
-- For any mutating execution call, provide an `idempotency_key` when the request
-  has an external approval/proposal id. Repeated calls with the same request
-  replay the first result instead of submitting again; reusing a key with a
-  different request must be treated as blocked.
+- Paper profile execution requires a v2 approval artifact bound to the exact
+  request hash, connector, account, expiry, and max notional. Repeated calls
+  with the same approved request replay the first result instead of submitting
+  again; reusing approval for a different request must be treated as blocked.
 - Keep Moirix out of execution ownership. Moirix can inform a proposal; Vibe
   execution tools perform the broker operation through profile capabilities.
 

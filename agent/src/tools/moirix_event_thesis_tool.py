@@ -8,6 +8,7 @@ from typing import Any
 
 from src.agent.tools import BaseTool
 from src.tools._moirix_adapter import adapter_artifact_dir
+from src.tools.moirix_grounding import validate_event_thesis_grounding
 
 
 SCHEMA_VERSION = "vibe.moirix_event_thesis.v1"
@@ -114,6 +115,17 @@ class MoirixEventThesisTool(BaseTool):
             )
 
         thesis = _normalize_authority(thesis)
+        grounding_errors = validate_event_thesis_grounding(out_dir, thesis)
+        if grounding_errors:
+            return json.dumps(
+                _blocked(
+                    "moirix_event_thesis_grounding_invalid",
+                    "event thesis is not grounded in matching nonblocked PIT news evidence",
+                    extra={"violations": grounding_errors},
+                ),
+                ensure_ascii=False,
+            )
+
         generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         thesis.setdefault("generated_at", generated_at)
         thesis.setdefault("status", "ok")

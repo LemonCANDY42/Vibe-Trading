@@ -12,6 +12,9 @@ from typing import Any
 
 from src.agent.tools import BaseTool
 from src.trading.idempotency import idempotency_schema_property, run_once
+from src.trading.paper_audit import write_paper_action
+from src.trading.paper_gate import build_paper_request, validate_paper_gate
+from src.trading.profiles import profile_by_id
 from src.trading.service import cancel_order, get_open_orders, get_positions, place_order
 
 
@@ -123,6 +126,71 @@ def _idempotency_key(kwargs: dict[str, Any]) -> str | None:
     return _connection(kwargs.get("idempotency_key"))
 
 
+def _paper_gate_for_execution(
+    *,
+    tool_name: str,
+    operation: str,
+    connection: str | None,
+    account: str | None,
+    actions: list[dict[str, Any]],
+    overrides: dict[str, Any],
+    approval_path: Any,
+    required_capabilities: tuple[str, ...],
+) -> tuple[dict[str, Any] | None, str | None, dict[str, Any] | None, dict[str, Any] | None, str | None]:
+    """Return (blocked_payload, idempotency_key, request, gate_decision, profile_id)."""
+    profile = profile_by_id(connection)
+    if profile.environment != "paper":
+        return None, None, None, None, profile.id
+    request = build_paper_request(
+        operation=tool_name,
+        connection=profile.id,
+        account=account,
+        actions=[{**action, "overrides": overrides} for action in actions],
+    )
+    gate = validate_paper_gate(
+        approval_path=approval_path,
+        request=request,
+        required_capabilities=required_capabilities,
+    )
+    gate_decision = gate.decision()
+    if gate.allowed:
+        return None, gate.idempotency_key, request, gate_decision, profile.id
+    payload = {
+        "status": "blocked",
+        "operation": operation,
+        "claim_gate": {"blockers": gate.blockers},
+        "gate_decision": gate_decision,
+    }
+    _write_paper_audit_safe(tool_name, operation, "blocked", profile.id, request, payload, gate_decision)
+    return payload, gate.idempotency_key, request, gate_decision, profile.id
+
+
+def _write_paper_audit_safe(
+    tool_name: str,
+    operation: str,
+    outcome: str,
+    profile_id: str | None,
+    request: dict[str, Any] | None,
+    response: dict[str, Any],
+    gate_decision: dict[str, Any] | None,
+) -> None:
+    if not request or not profile_id:
+        return
+    try:
+        write_paper_action(
+            kind=operation,
+            outcome=outcome,
+            profile_id=profile_id,
+            request=request,
+            response=response,
+            gate_decision=gate_decision or {},
+            approval_id=str((gate_decision or {}).get("approval_id") or "") or None,
+            tool_name=tool_name,
+        )
+    except Exception:
+        pass
+
+
 class TradingReplaceOrderTool(BaseTool):
     """Cancel an existing order and place a replacement order."""
 
@@ -148,6 +216,7 @@ class TradingReplaceOrderTool(BaseTool):
             "limit_price": {"type": "number"},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
             "dry_run": {"type": "boolean", "default": True},
+            "approval_path": {"type": "string", "description": "Required for paper execution when dry_run=false."},
             "idempotency_key": idempotency_schema_property(),
         },
         "required": ["order_id", "symbol", "side"],
@@ -178,15 +247,31 @@ class TradingReplaceOrderTool(BaseTool):
         }
         if dry_run:
             return _json({"status": "dry_run", **plan})
+        blocked, gate_key, gate_request, gate_decision, profile_id = _paper_gate_for_execution(
+            tool_name=self.name,
+            operation="replace_order",
+            connection=connection,
+            account=_connection(kwargs.get("account")),
+            actions=plan["actions"],
+            overrides=overrides,
+            approval_path=kwargs.get("approval_path"),
+            required_capabilities=("orders.cancel", "orders.place"),
+        )
+        if blocked is not None:
+            return _json(blocked)
         def _execute() -> dict[str, Any]:
             cancel = cancel_order(str(kwargs["order_id"]), connection, symbol=replacement["symbol"], **overrides)
             if str(cancel.get("status") or "").lower() != "ok":
-                return {"status": "blocked", **plan, "cancel_result": cancel}
+                result = {"status": "blocked", **plan, "cancel_result": cancel}
+                _write_paper_audit_safe(self.name, "replace_order", "blocked", profile_id, gate_request, result, gate_decision)
+                return result
             placed = _execute_order(replacement, connection, overrides)
             status = "ok" if str(placed.get("status") or "").lower() == "ok" else "blocked"
-            return {"status": status, **plan, "cancel_result": cancel, "place_result": placed}
+            result = {"status": status, **plan, "cancel_result": cancel, "place_result": placed}
+            _write_paper_audit_safe(self.name, "replace_order", "accepted" if status == "ok" else "blocked", profile_id, gate_request, result, gate_decision)
+            return result
 
-        return _json(run_once(tool_name=self.name, request=plan, idempotency_key=_idempotency_key(kwargs), execute=_execute))
+        return _json(run_once(tool_name=self.name, request=plan, idempotency_key=gate_key or _idempotency_key(kwargs), execute=_execute))
 
 
 class TradingCancelAllOrdersTool(BaseTool):
@@ -204,6 +289,7 @@ class TradingCancelAllOrdersTool(BaseTool):
             "account": {"type": "string"},
             "symbol": {"type": "string", "description": "Optional symbol filter."},
             "dry_run": {"type": "boolean", "default": True},
+            "approval_path": {"type": "string", "description": "Required for paper execution when dry_run=false."},
             "idempotency_key": idempotency_schema_property(),
         },
         "required": [],
@@ -235,12 +321,26 @@ class TradingCancelAllOrdersTool(BaseTool):
         if dry_run:
             return _json({"status": "dry_run", "operation": "cancel_all_orders", "dry_run": True, "actions": actions})
         request = {"operation": "cancel_all_orders", "dry_run": False, "connection": connection, "actions": actions, "overrides": overrides}
+        blocked, gate_key, gate_request, gate_decision, profile_id = _paper_gate_for_execution(
+            tool_name=self.name,
+            operation="cancel_all_orders",
+            connection=connection,
+            account=_connection(kwargs.get("account")),
+            actions=actions,
+            overrides=overrides,
+            approval_path=kwargs.get("approval_path"),
+            required_capabilities=("orders.cancel",),
+        )
+        if blocked is not None:
+            return _json(blocked)
         def _execute() -> dict[str, Any]:
             results = [cancel_order(item["order_id"], connection, symbol=item.get("symbol"), **overrides) for item in actions]
             ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
-            return {"status": "ok" if ok else "blocked", "operation": "cancel_all_orders", "dry_run": False, "actions": actions, "results": results}
+            result = {"status": "ok" if ok else "blocked", "operation": "cancel_all_orders", "dry_run": False, "actions": actions, "results": results}
+            _write_paper_audit_safe(self.name, "cancel_all_orders", "accepted" if ok else "blocked", profile_id, gate_request, result, gate_decision)
+            return result
 
-        return _json(run_once(tool_name=self.name, request=request, idempotency_key=_idempotency_key(kwargs), execute=_execute))
+        return _json(run_once(tool_name=self.name, request=request, idempotency_key=gate_key or _idempotency_key(kwargs), execute=_execute))
 
 
 class TradingClosePositionTool(BaseTool):
@@ -262,6 +362,7 @@ class TradingClosePositionTool(BaseTool):
             "limit_price": {"type": "number"},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
             "dry_run": {"type": "boolean", "default": True},
+            "approval_path": {"type": "string", "description": "Required for paper execution when dry_run=false."},
             "idempotency_key": idempotency_schema_property(),
         },
         "required": ["symbol"],
@@ -295,11 +396,26 @@ class TradingClosePositionTool(BaseTool):
         if dry_run:
             return _json({"status": "dry_run", "operation": "close_position", "dry_run": True, "actions": [{"type": "place_order", **plan}]})
         request = {"operation": "close_position", "dry_run": False, "connection": connection, "actions": [{"type": "place_order", **plan}], "overrides": overrides}
+        blocked, gate_key, gate_request, gate_decision, profile_id = _paper_gate_for_execution(
+            tool_name=self.name,
+            operation="close_position",
+            connection=connection,
+            account=_connection(kwargs.get("account")),
+            actions=request["actions"],
+            overrides=overrides,
+            approval_path=kwargs.get("approval_path"),
+            required_capabilities=("orders.place",),
+        )
+        if blocked is not None:
+            return _json(blocked)
         def _execute() -> dict[str, Any]:
             result = _execute_order(plan, connection, overrides)
-            return {"status": "ok" if str(result.get("status") or "").lower() == "ok" else "blocked", "operation": "close_position", "dry_run": False, "actions": [{"type": "place_order", **plan}], "result": result}
+            ok = str(result.get("status") or "").lower() == "ok"
+            payload = {"status": "ok" if ok else "blocked", "operation": "close_position", "dry_run": False, "actions": [{"type": "place_order", **plan}], "result": result}
+            _write_paper_audit_safe(self.name, "close_position", "accepted" if ok else "blocked", profile_id, gate_request, payload, gate_decision)
+            return payload
 
-        return _json(run_once(tool_name=self.name, request=request, idempotency_key=_idempotency_key(kwargs), execute=_execute))
+        return _json(run_once(tool_name=self.name, request=request, idempotency_key=gate_key or _idempotency_key(kwargs), execute=_execute))
 
 
 class TradingFlattenAccountTool(BaseTool):
@@ -318,6 +434,7 @@ class TradingFlattenAccountTool(BaseTool):
             "order_type": {"type": "string", "enum": ["market", "limit"], "default": "market"},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
             "dry_run": {"type": "boolean", "default": True},
+            "approval_path": {"type": "string", "description": "Required for paper execution when dry_run=false."},
             "idempotency_key": idempotency_schema_property(),
         },
         "required": [],
@@ -345,12 +462,26 @@ class TradingFlattenAccountTool(BaseTool):
         if dry_run:
             return _json({"status": "dry_run", "operation": "flatten_account", "dry_run": True, "actions": actions})
         request = {"operation": "flatten_account", "dry_run": False, "connection": connection, "actions": actions, "overrides": overrides}
+        blocked, gate_key, gate_request, gate_decision, profile_id = _paper_gate_for_execution(
+            tool_name=self.name,
+            operation="flatten_account",
+            connection=connection,
+            account=_connection(kwargs.get("account")),
+            actions=actions,
+            overrides=overrides,
+            approval_path=kwargs.get("approval_path"),
+            required_capabilities=("orders.place",),
+        )
+        if blocked is not None:
+            return _json(blocked)
         def _execute() -> dict[str, Any]:
             results = [_execute_order({k: v for k, v in action.items() if k != "type"}, connection, overrides) for action in actions]
             ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
-            return {"status": "ok" if ok else "blocked", "operation": "flatten_account", "dry_run": False, "actions": actions, "results": results}
+            payload = {"status": "ok" if ok else "blocked", "operation": "flatten_account", "dry_run": False, "actions": actions, "results": results}
+            _write_paper_audit_safe(self.name, "flatten_account", "accepted" if ok else "blocked", profile_id, gate_request, payload, gate_decision)
+            return payload
 
-        return _json(run_once(tool_name=self.name, request=request, idempotency_key=_idempotency_key(kwargs), execute=_execute))
+        return _json(run_once(tool_name=self.name, request=request, idempotency_key=gate_key or _idempotency_key(kwargs), execute=_execute))
 
 
 class TradingRebalanceTargetsTool(BaseTool):
@@ -377,6 +508,7 @@ class TradingRebalanceTargetsTool(BaseTool):
             "order_type": {"type": "string", "enum": ["market", "limit"], "default": "market"},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
             "dry_run": {"type": "boolean", "default": True},
+            "approval_path": {"type": "string", "description": "Required for paper execution when dry_run=false."},
             "idempotency_key": idempotency_schema_property(),
         },
         "required": ["targets"],
@@ -407,12 +539,26 @@ class TradingRebalanceTargetsTool(BaseTool):
         if dry_run:
             return _json({"status": "dry_run", "operation": "rebalance_targets", "dry_run": True, "actions": actions})
         request = {"operation": "rebalance_targets", "dry_run": False, "connection": connection, "actions": actions, "overrides": overrides}
+        blocked, gate_key, gate_request, gate_decision, profile_id = _paper_gate_for_execution(
+            tool_name=self.name,
+            operation="rebalance_targets",
+            connection=connection,
+            account=_connection(kwargs.get("account")),
+            actions=actions,
+            overrides=overrides,
+            approval_path=kwargs.get("approval_path"),
+            required_capabilities=("orders.place",),
+        )
+        if blocked is not None:
+            return _json(blocked)
         def _execute() -> dict[str, Any]:
             results = [_execute_order({k: v for k, v in action.items() if k != "type"}, connection, overrides) for action in actions]
             ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
-            return {"status": "ok" if ok else "blocked", "operation": "rebalance_targets", "dry_run": False, "actions": actions, "results": results}
+            payload = {"status": "ok" if ok else "blocked", "operation": "rebalance_targets", "dry_run": False, "actions": actions, "results": results}
+            _write_paper_audit_safe(self.name, "rebalance_targets", "accepted" if ok else "blocked", profile_id, gate_request, payload, gate_decision)
+            return payload
 
-        return _json(run_once(tool_name=self.name, request=request, idempotency_key=_idempotency_key(kwargs), execute=_execute))
+        return _json(run_once(tool_name=self.name, request=request, idempotency_key=gate_key or _idempotency_key(kwargs), execute=_execute))
 
 
 class TradingAdvancedOrderProposalTool(BaseTool):

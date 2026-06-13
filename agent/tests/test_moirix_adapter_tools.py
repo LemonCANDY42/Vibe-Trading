@@ -6,6 +6,7 @@ import json
 import sys
 import hashlib
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,7 @@ from src.tools.moirix_portfolio_context_tool import MoirixPortfolioContextTool
 from src.tools.moirix_position_decision_tool import MoirixPositionDecisionTool
 from src.tools.moirix_status_tool import MoirixStatusTool
 from src.tools.moirix_trade_execution_tool import MoirixTradeExecutionTool
+from src.trading.paper_gate import APPROVAL_SCHEMA_VERSION, build_paper_request, canonical_request_hash
 
 
 FALSE_AUTHORITY = {
@@ -157,6 +159,7 @@ def _run_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     run_dir = tmp_path / "run"
     (run_dir / "artifacts").mkdir(parents=True)
     monkeypatch.setenv("VIBE_TRADING_ALLOWED_RUN_ROOTS", str(run_dir))
+    monkeypatch.setenv("VIBE_TRADING_ALLOWED_FILE_ROOTS", str(run_dir))
     return run_dir
 
 
@@ -259,15 +262,21 @@ def _valid_decision() -> dict[str, object]:
 def _write_thesis_and_context(run_dir: Path) -> None:
     out = run_dir / "artifacts" / "moirix"
     out.mkdir(parents=True, exist_ok=True)
-    (out / "event_thesis_graph.json").write_text(json.dumps(_valid_thesis()), encoding="utf-8")
+    thesis = _valid_thesis()
+    thesis["status"] = "ok"
+    thesis["claim_gate"] = {"blockers": []}
+    (out / "event_thesis_graph.json").write_text(json.dumps(thesis), encoding="utf-8")
     (out / "event_decision_context.json").write_text(
         json.dumps(
             {
                 "schema_version": "vibe.moirix_event_decision_context.v1",
                 "status": "ok",
                 "target": "NVDA",
+                "market": "US",
+                "as_of": "2025-05-01",
                 "positions": [{"symbol": "NVDA", "position": 10, "avg_cost": 90.0}],
                 "account_summary": {"AvailableFunds_USD": "100000.00"},
+                "claim_gate": {"blockers": []},
                 "authority": {
                     "research_only": True,
                     "broker_submit_allowed": False,
@@ -277,6 +286,80 @@ def _write_thesis_and_context(run_dir: Path) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _write_query_news_artifacts(
+    run_dir: Path,
+    *,
+    target: str = "NVDA",
+    market: str = "US",
+    as_of: str = "2025-05-01",
+    rows: list[dict[str, object]] | None = None,
+) -> None:
+    out = run_dir / "artifacts" / "moirix"
+    out.mkdir(parents=True, exist_ok=True)
+    rows = rows or [{"event_id": "event:fixture", "visible_at": "2025-04-30T00:00:00Z", "validation_state": "valid"}]
+    (out / "news_evidence.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    (out / "request.json").write_text(
+        json.dumps({"command": "query-news", "request": {"target": target, "market": market, "as_of": as_of}}),
+        encoding="utf-8",
+    )
+    (out / "status.json").write_text(
+        json.dumps({"status": "ok", "target": target, "market": market, "as_of": as_of}),
+        encoding="utf-8",
+    )
+    (out / "coverage_status.json").write_text(
+        json.dumps({"status": "ok", "coverage": {"row_count": len(rows), "blocked_without_fake_evidence": False}}),
+        encoding="utf-8",
+    )
+
+
+def _write_execution_approval(
+    path: Path,
+    *,
+    proposal_path: Path,
+    connection: str,
+    account: str = "",
+    authority: dict[str, object] | None = None,
+    max_notional: float = 10_000,
+    estimated_prices: dict[str, float] | None = None,
+) -> dict[str, object]:
+    proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
+    proposal_hash = hashlib.sha256(proposal_path.read_bytes()).hexdigest()
+    request = build_paper_request(
+        operation="moirix_execute_trade_proposal",
+        connection=connection,
+        account=account,
+        actions=proposal.get("orders", []),
+        proposal_sha256=proposal_hash,
+    )
+    payload = {
+        "schema_version": APPROVAL_SCHEMA_VERSION,
+        "approval_id": "pytest-approval",
+        "approved": True,
+        "scope": "paper",
+        "execution_mode": "paper",
+        "connection": connection,
+        "account": account,
+        "request": request,
+        "request_sha256": canonical_request_hash(request),
+        "proposal_sha256": proposal_hash,
+        "max_notional": max_notional,
+        "estimated_prices": estimated_prices or {},
+        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=30)).replace(microsecond=0).isoformat(),
+        "authority": authority
+        if authority is not None
+        else {
+            "paper_trade_proposal_allowed": True,
+            "broker_submit_allowed": True,
+            "ready_for_real_money_trading_authority": False,
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return payload
 
 
 def test_moirix_tools_are_discoverable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -358,9 +441,7 @@ def test_write_event_thesis_persists_canonical_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_dir = _run_dir(tmp_path, monkeypatch)
-    evidence = run_dir / "artifacts" / "moirix" / "news_evidence.jsonl"
-    evidence.parent.mkdir(parents=True, exist_ok=True)
-    evidence.write_text('{"event_id":"event:fixture","visible_at":"2025-04-30T00:00:00Z"}\n', encoding="utf-8")
+    _write_query_news_artifacts(run_dir)
 
     payload = json.loads(
         MoirixEventThesisTool().execute(
@@ -389,9 +470,7 @@ def test_write_event_thesis_rejects_legacy_numeric_graph_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_dir = _run_dir(tmp_path, monkeypatch)
-    evidence = run_dir / "artifacts" / "moirix" / "news_evidence.jsonl"
-    evidence.parent.mkdir(parents=True, exist_ok=True)
-    evidence.write_text('{"event_id":"event:fixture"}\n', encoding="utf-8")
+    _write_query_news_artifacts(run_dir)
     thesis = _valid_thesis()
     assert isinstance(thesis["evidence_items"], list)
     thesis["evidence_items"][0]["confidence"] = 0.8  # type: ignore[index]
@@ -407,6 +486,23 @@ def test_write_event_thesis_rejects_legacy_numeric_graph_fields(
     assert "moirix_event_thesis_schema_invalid" in payload["claim_gate"]["blockers"]
     assert any("confidence" in item for item in payload["violations"])
     assert not (run_dir / "artifacts" / "moirix" / "event_thesis_graph.json").exists()
+
+
+def test_write_event_thesis_rejects_ungrounded_future_or_missing_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_query_news_artifacts(
+        run_dir,
+        rows=[{"event_id": "event:other", "visible_at": "2025-05-02T00:00:00Z", "validation_state": "valid"}],
+    )
+
+    payload = json.loads(MoirixEventThesisTool().execute(run_dir=str(run_dir), thesis_json=_valid_thesis()))
+
+    assert payload["status"] == "blocked"
+    assert "moirix_event_thesis_grounding_invalid" in payload["claim_gate"]["blockers"]
+    assert any("not present" in item or "after thesis.as_of" in item for item in payload["violations"])
 
 
 def test_portfolio_context_blocks_without_readonly_snapshot(
@@ -529,6 +625,27 @@ def test_write_position_decision_persists_research_only_proposal(
     assert proposal["authority"]["ready_for_real_money_trading_authority"] is False
 
 
+def test_write_position_decision_blocks_when_context_is_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    context = run_dir / "artifacts" / "moirix" / "event_decision_context.json"
+    payload_context = json.loads(context.read_text(encoding="utf-8"))
+    payload_context["status"] = "blocked"
+    payload_context["claim_gate"] = {"blockers": ["positions_unavailable"]}
+    context.write_text(json.dumps(payload_context), encoding="utf-8")
+
+    payload = json.loads(
+        MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_position_decision_grounding_invalid" in payload["claim_gate"]["blockers"]
+    assert any("event_decision_context" in item for item in payload["violations"])
+
+
 def test_write_position_decision_rejects_legacy_numeric_fields_and_empty_action_orders(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -595,12 +712,25 @@ def test_export_decision_projection_writes_backtest_artifacts(
     assert (out / "decision_projection.csv").exists()
     assert (out / "decision_projection.json").exists()
     assert (out / "backtest_projection_manifest.json").exists()
+    assert (out / "decision_projection_signal_engine.py").exists()
     csv_text = (out / "decision_projection.csv").read_text(encoding="utf-8")
     assert "NVDA" in csv_text
     assert "broker_submit_allowed" in csv_text
     manifest = json.loads((out / "backtest_projection_manifest.json").read_text(encoding="utf-8"))
     assert manifest["usage"].startswith("Backtest projection only")
+    assert manifest["vibe_backtest_consumer"]["type"] == "signal_engine_template"
     assert manifest["authority"]["broker_submit_allowed"] is False
+
+    import pandas as pd
+    from backtest.runner import _load_module_from_file
+
+    code_path = run_dir / "code" / "signal_engine.py"
+    code_path.parent.mkdir(parents=True)
+    code_path.write_text((out / "decision_projection_signal_engine.py").read_text(encoding="utf-8"), encoding="utf-8")
+    module = _load_module_from_file(code_path, "projection_signal_engine_test")
+    index = pd.to_datetime(["2025-05-01", "2025-05-03", "2025-05-11"])
+    signals = module.SignalEngine().generate({"NVDA": pd.DataFrame({"close": [1.0, 1.1, 1.2]}, index=index)})
+    assert list(signals["NVDA"]) == [0.0, 1.0, 0.0]
 
 
 def test_execute_trade_proposal_blocks_readonly_paper_connection(
@@ -612,21 +742,7 @@ def test_execute_trade_proposal_blocks_readonly_paper_connection(
     MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
     proposal_path = run_dir / "artifacts" / "moirix" / "trade_proposal.json"
     approval_path = run_dir / "artifacts" / "moirix" / "execution_approval.json"
-    approval_path.write_text(
-        json.dumps(
-            {
-                "approved": True,
-                "scope": "paper",
-                "proposal_sha256": hashlib.sha256(proposal_path.read_bytes()).hexdigest(),
-                "authority": {
-                    "paper_trade_proposal_allowed": True,
-                    "broker_submit_allowed": True,
-                    "ready_for_real_money_trading_authority": False,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_execution_approval(approval_path, proposal_path=proposal_path, connection="ibkr-paper-local")
 
     payload = json.loads(
         MoirixTradeExecutionTool().execute(
@@ -638,8 +754,8 @@ def test_execute_trade_proposal_blocks_readonly_paper_connection(
     )
 
     assert payload["status"] == "blocked"
-    assert "moirix_execution_profile_readonly" in payload["claim_gate"]["blockers"]
-    assert "moirix_execution_profile_lacks_orders_place" in payload["claim_gate"]["blockers"]
+    assert "paper_execution_profile_readonly" in payload["claim_gate"]["blockers"]
+    assert "paper_execution_profile_lacks_orders_place" in payload["claim_gate"]["blockers"]
 
 
 def test_execute_trade_proposal_requires_approval_authority(
@@ -651,16 +767,7 @@ def test_execute_trade_proposal_requires_approval_authority(
     MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
     proposal_path = run_dir / "artifacts" / "moirix" / "trade_proposal.json"
     approval_path = run_dir / "artifacts" / "moirix" / "execution_approval.json"
-    approval_path.write_text(
-        json.dumps(
-            {
-                "approved": True,
-                "scope": "paper",
-                "proposal_sha256": hashlib.sha256(proposal_path.read_bytes()).hexdigest(),
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_execution_approval(approval_path, proposal_path=proposal_path, connection="ibkr-paper-local", authority={})
 
     payload = json.loads(
         MoirixTradeExecutionTool().execute(
@@ -672,8 +779,8 @@ def test_execute_trade_proposal_requires_approval_authority(
     )
 
     assert payload["status"] == "blocked"
-    assert "moirix_execution_approval_missing_paper_authority" in payload["claim_gate"]["blockers"]
-    assert "moirix_execution_approval_missing_broker_submit_authority" in payload["claim_gate"]["blockers"]
+    assert "paper_execution_approval_missing_paper_authority" in payload["claim_gate"]["blockers"]
+    assert "paper_execution_approval_missing_broker_submit_authority" in payload["claim_gate"]["blockers"]
 
 
 def test_execute_trade_proposal_dry_run_passes_with_explicit_paper_approval(
@@ -685,21 +792,7 @@ def test_execute_trade_proposal_dry_run_passes_with_explicit_paper_approval(
     MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
     proposal_path = run_dir / "artifacts" / "moirix" / "trade_proposal.json"
     approval_path = run_dir / "artifacts" / "moirix" / "execution_approval.json"
-    approval_path.write_text(
-        json.dumps(
-            {
-                "approved": True,
-                "scope": "paper",
-                "proposal_sha256": hashlib.sha256(proposal_path.read_bytes()).hexdigest(),
-                "authority": {
-                    "paper_trade_proposal_allowed": True,
-                    "broker_submit_allowed": True,
-                    "ready_for_real_money_trading_authority": False,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_execution_approval(approval_path, proposal_path=proposal_path, connection="alpaca-paper-trade")
 
     payload = json.loads(
         MoirixTradeExecutionTool().execute(
@@ -739,6 +832,10 @@ def test_operator_approval_helper_generates_execution_approval(
             "paper dry-run test",
             "--phrase",
             "APPROVE PAPER EXECUTION",
+            "--connection",
+            "alpaca-paper-trade",
+            "--max-notional",
+            "10000",
         ],
         check=True,
         text=True,

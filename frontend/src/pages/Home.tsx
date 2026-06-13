@@ -524,6 +524,11 @@ function summarizeThesis(thesis: Record<string, unknown> | null): string {
 function summarizeDecisionContext(context: Record<string, unknown> | null): string {
   const counts = asRecord(context?.position_counts);
   const status = statusLabel(context);
+  const blockerValue = asRecord(context?.claim_gate)?.blockers;
+  const blockers = (Array.isArray(blockerValue) ? blockerValue : []).map((item) => String(item)).filter(Boolean);
+  if (status && !["ok", "partial"].includes(status.toLowerCase())) {
+    return blockers.length > 0 ? `${status} · ${blockers[0]}` : status;
+  }
   if (counts) {
     const positions = Number(counts.positions ?? 0);
     const orders = Number(counts.open_orders ?? 0);

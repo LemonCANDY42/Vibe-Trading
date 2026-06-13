@@ -11,6 +11,8 @@ from typing import Any
 
 from src.agent.tools import BaseTool
 from src.trading.idempotency import idempotency_schema_property, run_once
+from src.trading.paper_audit import write_paper_action
+from src.trading.paper_gate import build_paper_request, validate_paper_gate
 from src.trading.profiles import (
     list_profiles,
     load_selected_profile_id,
@@ -50,6 +52,14 @@ def _num_or_none(value: Any) -> float | None:
     if value in (None, ""):
         return None
     return float(value)
+
+
+def _bool(value: Any, *, default: bool) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 TRADING_COMMON_PARAMETERS = {
@@ -319,11 +329,11 @@ class TradingPlaceOrderTool(BaseTool):
 
     name = "trading_place_order"
     description = (
-        "Place an order through the selected trading connector profile. Paper "
-        "profiles trade a sandbox account; live profiles are gated by the user's "
-        "mandate and kill switch. side is 'buy' or 'sell'; give exactly one of "
-        "quantity (units) or notional (account-currency amount). IBKR paper "
-        "orders currently require quantity."
+        "Plan or place an order through the selected trading connector profile. "
+        "Defaults to dry_run=true. Paper execution requires an explicit approval "
+        "artifact bound to this exact request; live profiles are gated by the "
+        "existing mandate and kill switch. side is 'buy' or 'sell'; give exactly "
+        "one of quantity or notional. IBKR paper orders currently require quantity."
     )
     parameters = {
         "type": "object",
@@ -336,6 +346,8 @@ class TradingPlaceOrderTool(BaseTool):
             "order_type": {"type": "string", "enum": ["market", "limit"], "default": "market"},
             "limit_price": {"type": "number", "description": "Required for limit orders."},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
+            "dry_run": {"type": "boolean", "default": True},
+            "approval_path": {"type": "string", "description": "Required for paper execution when dry_run=false."},
             "idempotency_key": idempotency_schema_property(),
         },
         "required": ["symbol", "side"],
@@ -357,14 +369,52 @@ class TradingPlaceOrderTool(BaseTool):
                 "time_in_force": str(kwargs.get("time_in_force") or "day"),
                 "overrides": _overrides(kwargs),
             }
-            return _json_result(
-                run_once(
-                    tool_name=self.name,
-                    request=request,
-                    idempotency_key=_connection(kwargs.get("idempotency_key")),
-                    execute=lambda: place_order(
+            action = {
+                "type": "place_order",
+                "symbol": request["symbol"],
+                "side": request["side"],
+                "quantity": request["quantity"],
+                "notional": request["notional"],
+                "order_type": request["order_type"],
+                "limit_price": request["limit_price"],
+                "time_in_force": request["time_in_force"],
+            }
+            dry_run = _bool(kwargs.get("dry_run"), default=True)
+            if dry_run:
+                return _json_result({"status": "dry_run", "operation": "place_order", "dry_run": True, "actions": [action]})
+
+            profile = profile_by_id(request["connection"])
+            idempotency_key = _connection(kwargs.get("idempotency_key"))
+            gate_request: dict[str, Any] | None = None
+            gate_decision: dict[str, Any] | None = None
+            if profile.environment == "paper":
+                gate_request = build_paper_request(
+                    operation=self.name,
+                    connection=profile.id,
+                    account=_connection(kwargs.get("account")),
+                    actions=[{**action, "overrides": request["overrides"]}],
+                )
+                gate = validate_paper_gate(
+                    approval_path=kwargs.get("approval_path"),
+                    request=gate_request,
+                    required_capabilities=("orders.place",),
+                )
+                gate_decision = gate.decision()
+                if not gate.allowed:
+                    payload = {
+                        "status": "blocked",
+                        "operation": "place_order",
+                        "claim_gate": {"blockers": gate.blockers},
+                        "gate_decision": gate_decision,
+                    }
+                    _write_paper_audit_safe(self.name, "order_place", "blocked", profile.id, gate_request, payload, gate_decision)
+                    return _json_result(payload)
+                idempotency_key = gate.idempotency_key
+
+            def _execute() -> dict[str, Any]:
+                result = place_order(
                     str(kwargs["symbol"]),
-                    _connection(kwargs.get("connection")),
+                    request["connection"],
                     side=str(kwargs.get("side") or ""),
                     quantity=_num_or_none(kwargs.get("quantity")),
                     notional=_num_or_none(kwargs.get("notional")),
@@ -372,7 +422,18 @@ class TradingPlaceOrderTool(BaseTool):
                     limit_price=_num_or_none(kwargs.get("limit_price")),
                     time_in_force=str(kwargs.get("time_in_force") or "day"),
                     **_overrides(kwargs),
-                    ),
+                )
+                if profile.environment == "paper" and gate_request is not None:
+                    outcome = "accepted" if str(result.get("status") or "").lower() == "ok" else "blocked"
+                    _write_paper_audit_safe(self.name, "order_place", outcome, profile.id, gate_request, result, gate_decision or {})
+                return result
+
+            return _json_result(
+                run_once(
+                    tool_name=self.name,
+                    request=request,
+                    idempotency_key=idempotency_key,
+                    execute=_execute,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -383,13 +444,18 @@ class TradingCancelOrderTool(BaseTool):
     """Cancel an order through a trading connector profile (risk-reducing)."""
 
     name = "trading_cancel_order"
-    description = "Cancel an open order on the selected trading connector profile by order id."
+    description = (
+        "Plan or cancel an open order on the selected trading connector profile by order id. "
+        "Defaults to dry_run=true. Paper cancellation requires explicit approval when dry_run=false."
+    )
     parameters = {
         "type": "object",
         "properties": {
             **TRADING_COMMON_PARAMETERS,
             "order_id": {"type": "string", "description": "Broker order id to cancel."},
             "symbol": {"type": "string", "description": "Symbol (required by some brokers, e.g. OKX/Binance)."},
+            "dry_run": {"type": "boolean", "default": True},
+            "approval_path": {"type": "string", "description": "Required for paper cancellation when dry_run=false."},
             "idempotency_key": idempotency_schema_property(),
         },
         "required": ["order_id"],
@@ -406,18 +472,81 @@ class TradingCancelOrderTool(BaseTool):
                 "symbol": _connection(kwargs.get("symbol")),
                 "overrides": _overrides(kwargs),
             }
+            action = {"type": "cancel_order", "order_id": request["order_id"], "symbol": request["symbol"]}
+            dry_run = _bool(kwargs.get("dry_run"), default=True)
+            if dry_run:
+                return _json_result({"status": "dry_run", "operation": "cancel_order", "dry_run": True, "actions": [action]})
+            profile = profile_by_id(request["connection"])
+            idempotency_key = _connection(kwargs.get("idempotency_key"))
+            gate_request: dict[str, Any] | None = None
+            gate_decision: dict[str, Any] | None = None
+            if profile.environment == "paper":
+                gate_request = build_paper_request(
+                    operation=self.name,
+                    connection=profile.id,
+                    account=_connection(kwargs.get("account")),
+                    actions=[{**action, "overrides": request["overrides"]}],
+                )
+                gate = validate_paper_gate(
+                    approval_path=kwargs.get("approval_path"),
+                    request=gate_request,
+                    required_capabilities=("orders.cancel",),
+                )
+                gate_decision = gate.decision()
+                if not gate.allowed:
+                    payload = {
+                        "status": "blocked",
+                        "operation": "cancel_order",
+                        "claim_gate": {"blockers": gate.blockers},
+                        "gate_decision": gate_decision,
+                    }
+                    _write_paper_audit_safe(self.name, "order_cancel", "blocked", profile.id, gate_request, payload, gate_decision)
+                    return _json_result(payload)
+                idempotency_key = gate.idempotency_key
+
+            def _execute() -> dict[str, Any]:
+                result = cancel_order(
+                    str(kwargs["order_id"]),
+                    request["connection"],
+                    symbol=_connection(kwargs.get("symbol")),
+                    **_overrides(kwargs),
+                )
+                if profile.environment == "paper" and gate_request is not None:
+                    outcome = "accepted" if str(result.get("status") or "").lower() == "ok" else "blocked"
+                    _write_paper_audit_safe(self.name, "order_cancel", outcome, profile.id, gate_request, result, gate_decision or {})
+                return result
+
             return _json_result(
                 run_once(
                     tool_name=self.name,
                     request=request,
-                    idempotency_key=_connection(kwargs.get("idempotency_key")),
-                    execute=lambda: cancel_order(
-                    str(kwargs["order_id"]),
-                    _connection(kwargs.get("connection")),
-                    symbol=_connection(kwargs.get("symbol")),
-                    **_overrides(kwargs),
-                    ),
+                    idempotency_key=idempotency_key,
+                    execute=_execute,
                 )
             )
         except Exception as exc:  # noqa: BLE001
             return _json_result({"status": "error", "error": str(exc)})
+
+
+def _write_paper_audit_safe(
+    tool_name: str,
+    kind: str,
+    outcome: str,
+    profile_id: str,
+    request: dict[str, Any],
+    response: dict[str, Any],
+    gate_decision: dict[str, Any],
+) -> None:
+    try:
+        write_paper_action(
+            kind=kind,
+            outcome=outcome,
+            profile_id=profile_id,
+            request=request,
+            response=response,
+            gate_decision=gate_decision,
+            approval_id=str(gate_decision.get("approval_id") or "") or None,
+            tool_name=tool_name,
+        )
+    except Exception:
+        pass

@@ -8,6 +8,7 @@ from typing import Any
 
 from src.agent.tools import BaseTool
 from src.tools._moirix_adapter import adapter_artifact_dir
+from src.tools.moirix_grounding import validate_position_decision_grounding
 
 
 SCHEMA_VERSION = "vibe.moirix_position_decision.v1"
@@ -94,6 +95,17 @@ class MoirixPositionDecisionTool(BaseTool):
             )
 
         decision = _normalize_authority(decision)
+        grounding_errors = validate_position_decision_grounding(out_dir, decision)
+        if grounding_errors:
+            return json.dumps(
+                _blocked(
+                    "moirix_position_decision_grounding_invalid",
+                    "position decision is not grounded in ok event thesis and portfolio context artifacts",
+                    extra={"violations": grounding_errors},
+                ),
+                ensure_ascii=False,
+            )
+
         generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         decision.setdefault("generated_at", generated_at)
         decision.setdefault("status", "ok")

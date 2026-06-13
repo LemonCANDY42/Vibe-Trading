@@ -463,6 +463,8 @@ def cancel_order(
         return {"status": "error", "error": "IBKR local order cancellation is limited to paper profiles."}
     if config.readonly:
         return {"status": "error", "error": "IBKR local order cancellation requires a non-readonly paper profile."}
+    if config.client_id == 0:
+        return {"status": "error", "error": "IBKR local paper order cancellation must not use client_id=0."}
     try:
         order_id_int = int(str(order_id).strip())
     except (TypeError, ValueError):
@@ -534,6 +536,8 @@ def _validate_place_order(
         return {"status": "error", "error": "IBKR local order placement is limited to paper profiles."}
     if config.readonly:
         return {"status": "error", "error": "IBKR local order placement requires a non-readonly paper profile."}
+    if config.client_id == 0:
+        return {"status": "error", "error": "IBKR local paper order placement must not use client_id=0."}
     clean_side = side.strip().lower()
     if clean_side not in {"buy", "sell"}:
         return {"status": "error", "error": "side must be 'buy' or 'sell' for IBKR paper orders."}
@@ -638,9 +642,14 @@ def _assert_profile(config: IBKRLocalConfig, accounts: Iterable[str]) -> None:
     account_list = [account for account in accounts if account]
     if config.profile != "paper":
         return
+    if not account_list:
+        raise IBKRProfileMismatchError(
+            "Configured profile is paper, but IBKR managedAccounts returned no accounts. "
+            "Refusing to infer paper/live account status."
+        )
     has_paper = any(account.upper().startswith("DU") for account in account_list)
     has_live = any(account.upper().startswith("U") and not account.upper().startswith("DU") for account in account_list)
-    if account_list and (not has_paper or has_live):
+    if not has_paper or has_live:
         raise IBKRProfileMismatchError(
             "Configured profile is paper, but connected accounts do not look like IBKR paper accounts. "
             "Use `vibe-trading connector configure ibkr-live-local-readonly` only if you intend "

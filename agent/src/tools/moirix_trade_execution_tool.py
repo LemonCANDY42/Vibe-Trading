@@ -10,8 +10,9 @@ from typing import Any
 
 from src.agent.tools import BaseTool
 from src.tools._moirix_adapter import adapter_artifact_dir, resolve_adapter_input
-from src.trading.idempotency import idempotency_schema_property, run_once
-from src.trading.profiles import profile_by_id
+from src.trading.idempotency import run_once
+from src.trading.paper_audit import write_paper_action
+from src.trading.paper_gate import build_paper_request, validate_paper_gate
 from src.trading.service import place_order
 
 
@@ -48,12 +49,15 @@ class MoirixTradeExecutionTool(BaseTool):
                 "type": "string",
                 "description": "Trading connector profile id. Must be a non-readonly paper profile with orders.place.",
             },
+            "account": {
+                "type": "string",
+                "description": "Optional account code bound to the approval artifact and broker request.",
+            },
             "dry_run": {
                 "type": "boolean",
                 "description": "When true, validates and writes execution_status.json without placing orders.",
                 "default": True,
             },
-            "idempotency_key": idempotency_schema_property(),
         },
         "required": ["approval_path"],
     }
@@ -90,12 +94,11 @@ class MoirixTradeExecutionTool(BaseTool):
         try:
             proposal_bytes = proposal_path.read_bytes()
             proposal = json.loads(proposal_bytes.decode("utf-8"))
-            approval = json.loads(approval_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            payload = _blocked("moirix_execution_invalid_json", f"proposal or approval JSON is invalid: {exc}")
+            payload = _blocked("moirix_execution_invalid_json", f"proposal JSON is invalid: {exc}")
             return _write_and_return(out_dir, payload)
-        if not isinstance(proposal, dict) or not isinstance(approval, dict):
-            payload = _blocked("moirix_execution_invalid_shape", "proposal and approval must be JSON objects")
+        if not isinstance(proposal, dict):
+            payload = _blocked("moirix_execution_invalid_shape", "proposal must be a JSON object")
             return _write_and_return(out_dir, payload)
 
         proposal_hash = hashlib.sha256(proposal_bytes).hexdigest()
@@ -103,16 +106,35 @@ class MoirixTradeExecutionTool(BaseTool):
         dry_run = bool(kwargs.get("dry_run", True))
         blockers = _execution_blockers(
             proposal=proposal,
-            approval=approval,
-            proposal_hash=proposal_hash,
             execution_mode=execution_mode,
-            connection=str(kwargs.get("connection") or "").strip(),
         )
+        request = build_paper_request(
+            operation=self.name,
+            connection=str(kwargs.get("connection") or "").strip(),
+            account=str(kwargs.get("account") or "").strip(),
+            actions=proposal.get("orders") if isinstance(proposal.get("orders"), list) else [],
+            proposal_sha256=proposal_hash,
+        )
+        gate = validate_paper_gate(
+            approval_path=approval_path,
+            request=request,
+            required_capabilities=("orders.place",),
+            allowed_roots=[Path(run_dir)],
+        )
+        blockers.extend(gate.blockers)
         if blockers:
             payload = _blocked(
                 "moirix_execution_gate_blocked",
                 "trade proposal did not pass the execution gate",
-                extra={"blockers": blockers, "proposal_sha256": proposal_hash},
+                extra={"blockers": blockers, "proposal_sha256": proposal_hash, "gate_decision": gate.decision()},
+            )
+            _audit(
+                payload,
+                request=request,
+                gate=gate.decision(),
+                tool_name=self.name,
+                run_dir=str(run_dir),
+                outcome="blocked",
             )
             return _write_and_return(out_dir, payload)
 
@@ -122,7 +144,16 @@ class MoirixTradeExecutionTool(BaseTool):
                 proposal_hash=proposal_hash,
                 execution_mode=execution_mode,
                 connection=str(kwargs.get("connection") or "").strip(),
+                gate_decision=gate.decision(),
                 broker_results=[],
+            )
+            _audit(
+                payload,
+                request=request,
+                gate=gate.decision(),
+                tool_name=self.name,
+                run_dir=str(run_dir),
+                outcome="dry_run",
             )
             return _write_and_return(out_dir, payload)
 
@@ -140,6 +171,7 @@ class MoirixTradeExecutionTool(BaseTool):
                     order_type=str(order.get("order_type") or "market"),
                     limit_price=_num_or_none(order.get("limit_price")),
                     time_in_force=str(order.get("time_in_force") or "day"),
+                    account=str(kwargs.get("account") or "").strip() or None,
                 )
                 broker_results.append(result)
                 if str(result.get("status") or "").lower() == "error":
@@ -150,23 +182,25 @@ class MoirixTradeExecutionTool(BaseTool):
                 proposal_hash=proposal_hash,
                 execution_mode=execution_mode,
                 connection=str(kwargs.get("connection") or "").strip(),
+                gate_decision=gate.decision(),
                 broker_results=broker_results,
             )
             if status != "ok":
                 payload["claim_gate"]["blockers"].append("moirix_execution_broker_rejected_or_unavailable")
+            _audit(
+                payload,
+                request=request,
+                gate=gate.decision(),
+                tool_name=self.name,
+                run_dir=str(run_dir),
+                outcome="accepted" if status == "ok" else "blocked",
+            )
             return payload
 
-        request = {
-            "proposal_hash": proposal_hash,
-            "approval_path": str(approval_path),
-            "execution_mode": execution_mode,
-            "connection": str(kwargs.get("connection") or "").strip(),
-            "orders": proposal.get("orders", []),
-        }
         payload = run_once(
             tool_name=self.name,
             request=request,
-            idempotency_key=str(kwargs.get("idempotency_key") or "").strip() or proposal_hash,
+            idempotency_key=gate.idempotency_key,
             execute=_execute,
         )
         return _write_and_return(out_dir, payload)
@@ -190,46 +224,21 @@ class MoirixTradeExecutionTool(BaseTool):
 def _execution_blockers(
     *,
     proposal: dict[str, Any],
-    approval: dict[str, Any],
-    proposal_hash: str,
     execution_mode: str,
-    connection: str,
 ) -> list[str]:
     blockers: list[str] = []
     if execution_mode != "paper":
         blockers.append("moirix_live_execution_blocked_in_v1")
-    if approval.get("approved") is not True:
-        blockers.append("moirix_execution_approval_not_true")
-    if str(approval.get("scope") or "").strip().lower() != "paper":
-        blockers.append("moirix_execution_approval_scope_not_paper")
-    if str(approval.get("proposal_sha256") or "").strip().lower() != proposal_hash:
-        blockers.append("moirix_execution_approval_hash_mismatch")
     authority = proposal.get("authority") if isinstance(proposal.get("authority"), dict) else {}
+    if authority.get("paper_trade_proposal_allowed") is True:
+        blockers.append("moirix_proposal_claims_paper_execution_authority")
+    if authority.get("broker_submit_allowed") is True:
+        blockers.append("moirix_proposal_claims_broker_submit_authority")
     if authority.get("ready_for_real_money_trading_authority") is True:
         blockers.append("moirix_proposal_claims_real_money_authority")
-    approval_authority = approval.get("authority") if isinstance(approval.get("authority"), dict) else approval
-    if approval_authority.get("paper_trade_proposal_allowed") is not True:
-        blockers.append("moirix_execution_approval_missing_paper_authority")
-    if approval_authority.get("broker_submit_allowed") is not True:
-        blockers.append("moirix_execution_approval_missing_broker_submit_authority")
-    if approval_authority.get("ready_for_real_money_trading_authority") is True:
-        blockers.append("moirix_execution_approval_claims_real_money_authority")
     orders = proposal.get("orders")
     if not isinstance(orders, list) or not orders:
         blockers.append("moirix_proposal_has_no_orders")
-    if not connection:
-        blockers.append("moirix_execution_connection_required")
-    else:
-        try:
-            profile = profile_by_id(connection)
-            if profile.environment != "paper":
-                blockers.append("moirix_execution_profile_not_paper")
-            if profile.readonly:
-                blockers.append("moirix_execution_profile_readonly")
-            if "orders.place" not in profile.capabilities:
-                blockers.append("moirix_execution_profile_lacks_orders_place")
-        except ValueError:
-            blockers.append("moirix_execution_unknown_connection")
     return blockers
 
 
@@ -239,6 +248,7 @@ def _status(
     proposal_hash: str,
     execution_mode: str,
     connection: str,
+    gate_decision: dict[str, Any],
     broker_results: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -249,6 +259,7 @@ def _status(
         "execution_mode": execution_mode,
         "connection": connection,
         "broker_results": broker_results,
+        "gate_decision": gate_decision,
         "claim_gate": {
             "blockers": [],
             "ready_for_real_money_trading_authority": False,
@@ -294,6 +305,33 @@ def _write_and_return(out_dir: Path, payload: dict[str, Any]) -> str:
     payload.setdefault("artifacts", {})["execution_status"] = str(path)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _audit(
+    payload: dict[str, Any],
+    *,
+    request: dict[str, Any],
+    gate: dict[str, Any],
+    tool_name: str,
+    run_dir: str,
+    outcome: str,
+) -> None:
+    try:
+        record = write_paper_action(
+            kind="moirix_trade_execution",
+            outcome=outcome,
+            profile_id=str(request.get("connection") or "") or None,
+            request=request,
+            response=payload,
+            gate_decision=gate,
+            approval_id=str(gate.get("approval_id") or "") or None,
+            tool_name=tool_name,
+            run_dir=run_dir,
+        )
+        payload.setdefault("artifacts", {})["paper_audit_id"] = str(record.get("audit_id") or "")
+    except Exception as exc:  # noqa: BLE001 - failed audit must be visible and fail closed
+        payload.setdefault("claim_gate", {}).setdefault("blockers", []).append("paper_audit_write_failed")
+        payload["audit_error"] = str(exc)
 
 
 def _num_or_none(value: Any) -> float | None:

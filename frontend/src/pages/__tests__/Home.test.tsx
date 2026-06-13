@@ -161,6 +161,33 @@ describe("Home workbench", () => {
     expect(screen.getByRole("link", { name: "Authority" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixAuthority");
   });
 
+  it("shows blocked Moirix decision context instead of zero positions", async () => {
+    apiMock.listRuns.mockResolvedValue([
+      makeRun({ run_id: "moirix_run", prompt: "Run Moirix evidence workflow for NVDA" }),
+    ]);
+    apiMock.getRun.mockResolvedValue(makeMoirixDetail({
+      moirix_artifacts: {
+        status: { status: "ok" },
+        event_thesis_graph: { current_thesis: { stance: "mixed", actionability: "watch" } },
+        event_decision_context: {
+          status: "blocked",
+          position_counts: { positions: 0, open_orders: 0 },
+          claim_gate: { blockers: ["positions_unavailable"] },
+        },
+        authority_status: {
+          status: "checked",
+          authority: { ready_for_real_money_trading_authority: false },
+        },
+      },
+      artifacts: [{ name: "moirix/event_thesis_graph.json", path: "/runs/moirix/artifacts/moirix/event_thesis_graph.json", type: "json", size: 12, exists: true }],
+    }));
+
+    renderHome();
+
+    expect(await screen.findByText("blocked · positions_unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("0 positions · 0 orders")).not.toBeInTheDocument();
+  });
+
   it("does not surface legacy graph-only Moirix runs as event thesis runs", async () => {
     apiMock.listRuns.mockResolvedValue([
       makeRun({ run_id: "legacy_moirix_run", prompt: "Legacy Moirix graph workflow" }),

@@ -46,6 +46,11 @@ but every mutating operation must remain capability-gated:
 - mutating Agent-facing tools must be idempotent: repeated identical requests
   replay the first result from the persistent idempotency ledger, while reusing
   the same key for a different request is blocked;
+- paper-profile mutating Agent-facing tools must require a v2 approval artifact
+  when `dry_run=false`. The approval must bind request hash, connection,
+  account, expiry, max notional, and paper authority. The execution path must
+  check the paper kill switch and append a redacted record to
+  `<runtime_root>/trading/paper/audit.jsonl`;
 - unsupported broker behavior must return blocked/error rather than being
   simulated as real execution;
 - autonomous Agent operation is allowed only inside explicit environment,
@@ -180,8 +185,8 @@ authority fields.
 The proposal remains research-only by default. A separate paper execution
 approval artifact may grant `paper_trade_proposal_allowed=true` and
 `broker_submit_allowed=true`, but it must keep
-`ready_for_real_money_trading_authority=false` and match the exact proposal
-hash.
+`ready_for_real_money_trading_authority=false` and match the exact canonical
+request hash, connector, account, expiry, and max-notional bound.
 
 The following must remain blocked unless a future PRD explicitly changes the
 contract and adds independent review evidence:
@@ -206,11 +211,12 @@ Required authority fields:
 Paper execution may be added only as a separate, auditable workflow. Live
 execution remains out of scope for the current Moirix decision layer.
 
-### 5.1 IBKR Paper Read-Only Discipline
+### 5.1 IBKR Paper Discipline
 
-The logged-in IB Gateway paper account may be used only for read-only readiness
-and portfolio-context artifacts unless a later PRD explicitly authorizes a
-paper-order workflow.
+The logged-in IB Gateway paper account may be used for read-only readiness and
+portfolio-context artifacts through `ibkr-paper-local`. Paper order execution
+uses `ibkr-paper-trade` only after an explicit approval artifact and Vibe
+execution gate pass.
 
 Allowed:
 
@@ -224,12 +230,18 @@ Allowed:
 
 Forbidden:
 
-- `placeOrder`;
-- `cancelOrder`;
+- `placeOrder` through `ibkr-paper-local`;
+- `cancelOrder` through `ibkr-paper-local`;
 - `reqGlobalCancel`;
-- order transmit;
+- order transmit without approval v2 and paper gate;
 - simulated submit;
 - live submit.
+
+Additional IBKR write gates:
+
+- `client_id=0` is blocked for paper write paths;
+- an empty `managedAccounts()` result is blocked rather than inferred safe;
+- IBKR live profiles remain read-only.
 
 If read-only portfolio context is unavailable, return `blocked` or
 `unavailable`. Do not fabricate positions.

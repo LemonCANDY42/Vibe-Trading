@@ -102,15 +102,20 @@ feat/moirix-event-graph-extension-v0
 
 Current stage:
 
-- remove the old Vibe-side numeric graph/signal tools;
-- add `moirix_write_event_thesis`;
-- add `moirix_portfolio_context`;
-- add `moirix_write_position_decision`;
-- add `moirix_export_decision_projection`;
-- add `moirix_execute_trade_proposal` as a fail-closed execution gate;
-- replace `moirix_event_impact_desk` with `moirix_event_thesis_committee`;
-- update Agent routing, skill docs, Home, Run Detail, API previews, and tests;
-- remove old local numeric Moirix run artifacts from this workspace.
+- harden `moirix_write_event_thesis` so a thesis is accepted only when
+  `news_evidence.jsonl`, `request.json`, `status.json`, and
+  `coverage_status.json` prove a nonblocked `query-news` result with matching
+  `target`, `market`, `as_of`, referenced `event_id`s, and `visible_at <= as_of`;
+- harden `moirix_write_position_decision` so a decision is accepted only when
+  both `event_thesis_graph.json` and `event_decision_context.json` are `ok`,
+  blocker-free, and identity-matched;
+- harden `moirix_execute_trade_proposal` and Agent-facing paper mutating
+  `trading_*` tools behind a v2 approval artifact, profile capability checks,
+  paper kill switch, max-notional bound, gate-derived idempotency, and an
+  append-only paper audit ledger;
+- keep `ibkr-paper-trade` paper-only and block `client_id=0` write paths;
+- make `moirix_export_decision_projection` produce a tested Vibe signal-engine
+  consumer template for backtests.
 
 ## In Scope
 
@@ -149,18 +154,30 @@ Current stage:
 - Tool registry exposes the canonical Moirix tools and not the removed
   graph/signal/backtest tools.
 - `moirix_write_event_thesis` writes thesis/report/authority artifacts when
-  PIT evidence exists.
+- matching nonblocked PIT evidence exists.
+- `moirix_write_event_thesis` rejects empty evidence, non-`query-news`
+  request artifacts, future `visible_at`, and thesis event IDs not present in
+  PIT evidence.
 - `moirix_write_event_thesis` blocks old numeric graph fields.
 - `moirix_portfolio_context` writes blocked/unavailable context without fake
   positions when no read-only portfolio artifact exists.
 - `moirix_write_position_decision` writes position decision, normalized trade
   proposal, risk sizing report, and portfolio adjustment plan artifacts.
+- `moirix_write_position_decision` blocks when portfolio context is
+  blocked/unavailable or identity-mismatched.
 - `moirix_write_position_decision` keeps proposal authority research-only and
   broker-submit false by default.
 - `moirix_export_decision_projection` writes research-only backtest projection
   artifacts from position decisions without broker authority.
+- `moirix_export_decision_projection` writes a Vibe-compatible signal-engine
+  template and manifest pointer so the projection has a tested backtest
+  consumption path.
 - `moirix_execute_trade_proposal` blocks when approval authority, proposal hash,
-  connector profile, or execution mode is missing or unsafe.
+- request hash, account, connector profile, expiry, max notional, kill switch,
+  or execution mode is missing or unsafe.
+- Agent-facing paper mutating trading tools require explicit approval when
+  `dry_run=false`, derive idempotency from approval/request hash, and append to
+  the paper audit ledger.
 - Live execution remains blocked in this goal.
 - Run API surfaces `event_thesis_graph`, `event_thesis_report_markdown`, and
   `event_decision_context`, plus position decision artifacts when present.

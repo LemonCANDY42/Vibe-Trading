@@ -41,6 +41,9 @@ produces the auditable thesis.
    - `event_thesis_report.md`;
    - `authority_status.json`;
    - `vibe_run_card_patch.json`.
+   This write must fail closed unless the same run has nonblocked
+   `query-news` evidence with matching `target`, `market`, `as_of`, referenced
+   event IDs, and `visible_at <= as_of`.
 6. When the user asks for a position decision or new-target action proposal,
    synthesize `vibe.moirix_position_decision.v1` and call
    `moirix_write_position_decision` to persist:
@@ -50,10 +53,13 @@ produces the auditable thesis.
    - `portfolio_adjustment_plan.md`.
 7. If the user asks for historical evaluation or backtesting, call
    `moirix_export_decision_projection`. This writes research-only backtest
-   projection artifacts; it is not Moirix evidence and not an order.
+   projection artifacts and a Vibe signal-engine template; it is not Moirix
+   evidence and not an order.
 8. If the user provides an explicit paper execution approval artifact, call
    `moirix_execute_trade_proposal`. Without approval it must return blocked.
-   Live execution is blocked in v1.
+   The approval must use schema `vibe.paper_execution_approval.v2` and bind the
+   request hash, connector, account, expiry, and max notional. Live execution is
+   blocked in v1.
 9. If checking a proposal, call `moirix_authority_guard`. Its outputs live under
    `artifacts/moirix/authority_checks/<proposal-id>/` so a blocked proposal does
    not overwrite the primary thesis artifacts.
@@ -111,7 +117,7 @@ vibe.moirix_position_decision.v1` and include:
 existing Vibe trading connector gates pass.
 
 The approval artifact, not the proposal, grants paper execution authority. It
-must reference the exact proposal hash and keep real-money authority false.
+must reference the exact request hash and keep real-money authority false.
 
 `decision_projection.csv` and `decision_projection.json` are the only canonical
 backtest projection artifacts for this workflow. They are derived from

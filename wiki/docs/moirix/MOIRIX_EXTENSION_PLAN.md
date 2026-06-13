@@ -149,14 +149,22 @@ may contain one or more proposed orders, but by default the writer keeps:
 }
 ```
 
-An execution approval is a separate JSON artifact that must reference the exact
-proposal hash and explicitly grant paper execution authority:
+An execution approval is a separate v2 JSON artifact that must bind the exact
+paper execution request, not only the proposal file:
 
 ```json
 {
+  "schema_version": "vibe.paper_execution_approval.v2",
+  "approval_id": "mpa_...",
   "approved": true,
   "scope": "paper",
+  "execution_mode": "paper",
+  "connection": "alpaca-paper-trade",
+  "account": "",
   "proposal_sha256": "...",
+  "request_sha256": "...",
+  "max_notional": 10000,
+  "expires_at": "2026-06-13T12:00:00+00:00",
   "authority": {
     "paper_trade_proposal_allowed": true,
     "broker_submit_allowed": true,
@@ -166,7 +174,9 @@ proposal hash and explicitly grant paper execution authority:
 ```
 
 Without this approval, `moirix_execute_trade_proposal` writes a blocked
-`execution_status.json` and never calls a broker. The proposal itself remains
+`execution_status.json` and never calls a broker. The approval must match the
+request hash, connector, account, expiry window, max-notional bound, paper
+profile capabilities, and kill switch. The proposal itself remains
 research-only by default; the separate approval artifact is the paper-execution
 authority grant.
 
@@ -213,8 +223,13 @@ The normal Agent flow is:
    - open questions and invalidation triggers;
    - authority fields.
 6. Call `moirix_write_event_thesis`.
+   The write is accepted only when the thesis references event IDs present in
+   the same run's nonblocked `query-news` PIT evidence and no referenced
+   evidence has `visible_at` after `as_of`.
 7. If the user asks for a current-position or new-target decision, synthesize a
    position decision and call `moirix_write_position_decision`.
+   The write is accepted only when the thesis and portfolio context artifacts
+   are `ok`, blocker-free, and identity-matched.
 8. If the user asks for historical evaluation or backtesting, call
    `moirix_export_decision_projection`. The projection must remain research-only
    and must not be treated as Moirix evidence or a broker order.
@@ -240,12 +255,16 @@ The backtest projection layer answers:
 - how the research proposal is represented as dated, auditable rows;
 - which symbol/action/side/size the backtest may consume;
 - which source decision hash and authority fields bound the projection.
+- which Vibe `SignalEngine` template can consume the projection in the normal
+  backtest runner.
 
 The execution layer answers a different question:
 
 - is this exact proposal authorized for paper execution now;
 - does the selected trading connector support the requested order path;
 - did the broker accept, reject, or fail the order request.
+- was the attempt appended to the paper audit ledger and protected by
+  idempotency so the same approval cannot place twice.
 
 The thesis and decision layers must never self-enable execution. The execution
 layer must be independently auditable and fail closed.
