@@ -402,8 +402,8 @@ vibe-trading-mcp</code></pre>
       {
         id: "kenny/personal-vibe-moirix-fork",
         title: "Kenny Vibe-Moirix fork",
-        description: "Personal fork roadmap, current V0 goal, and upstream sync policy.",
-        lead: "This fork keeps Vibe-Trading as the primary research workbench while adding an optional, fail-closed Moirix extension for PIT evidence and event-impact graph research.",
+        description: "Personal fork roadmap, current event thesis goal, and upstream sync policy.",
+        lead: "This fork keeps Vibe-Trading as the primary research workbench while adding an optional, fail-closed Moirix extension for PIT evidence, Agent-driven event thesis research, and portfolio-aware position proposals.",
         sections: [
           {
             id: "source-docs",
@@ -412,7 +412,7 @@ vibe-trading-mcp</code></pre>
               <ul>
                 <li><a href="/docs/kenny/PRD_PERSONAL_VIBE_MOIRIX_FORK.md">Personal Vibe-Moirix fork PRD</a></li>
                 <li><a href="/docs/kenny/MAINTENANCE_PARADIGM.md">Maintenance paradigm</a></li>
-                <li><a href="/docs/kenny/CURRENT_GOAL.md">Current V0 goal</a></li>
+                <li><a href="/docs/kenny/CURRENT_GOAL.md">Current event thesis goal</a></li>
                 <li><a href="/docs/kenny/UPSTREAM_SYNC_POLICY.md">Upstream sync policy</a></li>
                 <li><a href="/docs/kenny/REVIEW_MOIRIX_EXTENSION_V0.md">Moirix Extension V0 review</a></li>
                 <li><a href="/docs/moirix/MOIRIX_EXTENSION_PLAN.md">Moirix extension plan</a></li>
@@ -421,17 +421,17 @@ vibe-trading-mcp</code></pre>
           },
           {
             id: "current-scope",
-            title: "Current V0 scope",
+            title: "Current scope",
             body: `
-              <p>The current branch implements the optional local adapter wrapper, three Vibe tools, one skill, and one swarm preset: <code>moirix_status</code>, <code>moirix_query_news</code>, <code>moirix_build_event_graph</code>, <code>moirix-event-graph</code>, and <code>moirix_event_impact_desk</code>.</p>
-              <p>It does not add broker submit, real-money authority, frontend Moirix panels, IBKR paper submission, or fake PIT evidence when Moirix is blocked or unavailable.</p>
+              <p>The current branch implements the optional local adapter wrapper and canonical thesis/decision tools: <code>moirix_status</code>, <code>moirix_query_news</code>, <code>moirix_portfolio_context</code>, <code>moirix_write_event_thesis</code>, <code>moirix_write_position_decision</code>, <code>moirix_export_decision_projection</code>, <code>moirix_execute_trade_proposal</code>, <code>moirix_authority_guard</code>, <code>moirix-event-graph</code>, <code>moirix_event_thesis_committee</code>, and <code>moirix_position_decision_committee</code>.</p>
+              <p>It removes the old numeric event-impact graph / event_signal path from the Vibe tool surface. It can design research-only trade proposals, export research-only backtest projections, and includes a fail-closed paper execution gate, but it does not grant real-money authority, auto-enable IBKR paper submission, or fake PIT evidence when Moirix is blocked or unavailable.</p>
             `
           },
           {
             id: "acceptance",
             title: "Acceptance",
             body: `
-              <p>Completion is measured by the tracked PRD, maintenance paradigm, and current-goal docs existing under <code>wiki/docs/kenny/</code>, Moirix implementation docs reflecting implemented vs deferred scope, <code>git diff --check</code> passing, and the targeted Moirix tool plus skill/swarm tests passing locally.</p>
+              <p>Completion is measured by the current-goal and extension-plan docs matching the thesis and position-decision workflow, <code>git diff --check</code> passing, backend tool tests passing, Run API previews exposing thesis/context/position artifacts, and Home/Run Detail tests showing the new Moirix Event Thesis and Position Decision surfaces.</p>
             `
           }
         ]

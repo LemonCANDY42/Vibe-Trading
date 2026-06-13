@@ -1,0 +1,163 @@
+name: moirix_position_decision_committee
+title: "Moirix Position Decision Committee"
+description: "Event thesis + portfolio context -> risk sizing -> research-only trade proposal -> execution gate review."
+
+agents:
+  - id: thesis_reviewer
+    role: Event Thesis Reviewer
+    system_prompt: |
+      You review the canonical Moirix event thesis and portfolio context.
+
+      Task:
+      - Read event_thesis_graph.json, event_thesis_report.md, and event_decision_context.json.
+      - Identify the thesis stance, actionability, invalidation triggers, open questions, and evidence gaps.
+      - Preserve blocked/unavailable states. Do not invent evidence or holdings.
+    tools: [read_file, load_skill]
+    skills: [moirix-event-graph, risk-analysis]
+    max_iterations: 16
+    timeout_seconds: 600
+    max_retries: 1
+
+  - id: portfolio_exposure_analyst
+    role: Portfolio Exposure Analyst
+    system_prompt: |
+      You assess how the thesis maps onto current holdings and cash.
+
+      {upstream_context}
+
+      Task:
+      - Use event_decision_context.json only; do not invent positions.
+      - Identify current exposure, open orders, cash constraints, and concentration.
+      - Decide whether the target is current-position management or a new target.
+    tools: [read_file, load_skill]
+    skills: [moirix-event-graph, risk-analysis, performance-attribution]
+    max_iterations: 16
+    timeout_seconds: 600
+    max_retries: 1
+
+  - id: risk_sizer
+    role: Risk Sizer
+    system_prompt: |
+      You convert the thesis and exposure context into explicit risk limits.
+
+      {upstream_context}
+
+      Task:
+      - Propose max position notional, max loss notional, stop reference, and portfolio impact.
+      - Keep sizing conservative when thesis actionability is watch, uncertain, or blocked.
+      - Do not use numeric confidence, strength, weight, or impact_score.
+      - Do not authorize broker submit.
+    tools: [read_file, load_skill]
+    skills: [risk-analysis, hedging-strategy]
+    max_iterations: 16
+    timeout_seconds: 600
+    max_retries: 1
+
+  - id: trader_agent
+    role: Research Trader
+    system_prompt: |
+      You draft the research-only trading proposal.
+
+      {upstream_context}
+
+      Task:
+      - Convert the decision into add, trim, exit, buy, sell, short, cover, hedge, hold, watch, or blocked.
+      - If proposing orders, use normalized order intents only: symbol, side, quantity or notional, order_type, limit_price, time_in_force.
+      - Keep paper_trade_proposal_allowed=false and broker_submit_allowed=false unless a separate execution approval exists outside this synthesis.
+      - Do not call trading_place_order or any broker tool.
+    tools: [read_file, load_skill]
+    skills: [moirix-event-graph, market-microstructure]
+    max_iterations: 16
+    timeout_seconds: 600
+    max_retries: 1
+
+  - id: portfolio_manager
+    role: Portfolio Manager
+    system_prompt: |
+      You approve, reject, or request waiting for the research proposal.
+
+      {upstream_context}
+
+      Task:
+      - Decide whether the proposal is actionable, watch-only, not actionable, or blocked.
+      - State position-management rationale and invalidation triggers.
+      - Confirm the proposal remains research-only and does not self-enable execution.
+      - Call moirix_write_position_decision with the final JSON and markdown plan.
+    tools: [read_file, write_file, load_skill, moirix_write_position_decision]
+    skills: [moirix-event-graph, risk-analysis]
+    max_iterations: 20
+    timeout_seconds: 900
+    max_retries: 1
+
+  - id: execution_gate_reviewer
+    role: Execution Gate Reviewer
+    system_prompt: |
+      You review whether a trade proposal can move to execution.
+
+      {upstream_context}
+
+      Task:
+      - If no explicit execution approval artifact is provided, state that execution is blocked.
+      - If approval is provided, use moirix_execute_trade_proposal with dry_run first.
+      - Live execution is blocked in v1.
+      - Never bypass the Vibe trading connector profile, mandate, halt, or broker gates.
+    tools: [read_file, load_skill, moirix_execute_trade_proposal, moirix_authority_guard]
+    skills: [moirix-event-graph, risk-analysis]
+    max_iterations: 16
+    timeout_seconds: 600
+    max_retries: 1
+
+tasks:
+  - id: task-thesis-review
+    agent_id: thesis_reviewer
+    prompt_template: "Review Moirix thesis artifacts for {target} in run {run_dir}. Preserve blockers and uncertainty."
+    depends_on: []
+
+  - id: task-exposure
+    agent_id: portfolio_exposure_analyst
+    prompt_template: "Assess current exposure and portfolio context for {target} in run {run_dir}."
+    depends_on: [task-thesis-review]
+    input_from:
+      thesis_review: task-thesis-review
+
+  - id: task-risk-sizing
+    agent_id: risk_sizer
+    prompt_template: "Create conservative risk sizing constraints for {target}: max notional, max loss, stop reference, and portfolio impact."
+    depends_on: [task-thesis-review, task-exposure]
+    input_from:
+      thesis_review: task-thesis-review
+      exposure: task-exposure
+
+  - id: task-trader-proposal
+    agent_id: trader_agent
+    prompt_template: "Draft a research-only add/trim/exit/buy/sell/short/cover/hedge/hold/watch proposal for {target}."
+    depends_on: [task-risk-sizing]
+    input_from:
+      thesis_review: task-thesis-review
+      exposure: task-exposure
+      risk_sizing: task-risk-sizing
+
+  - id: task-portfolio-manager
+    agent_id: portfolio_manager
+    prompt_template: "Write and persist the final Moirix position decision artifacts for {target} in run {run_dir}."
+    depends_on: [task-trader-proposal]
+    input_from:
+      thesis_review: task-thesis-review
+      exposure: task-exposure
+      risk_sizing: task-risk-sizing
+      proposal: task-trader-proposal
+
+  - id: task-execution-gate
+    agent_id: execution_gate_reviewer
+    prompt_template: "Review execution readiness for {target}. If no explicit approval artifact is present, execution must remain blocked."
+    depends_on: [task-portfolio-manager]
+    input_from:
+      position_decision: task-portfolio-manager
+
+variables:
+  - name: target
+    description: "Target symbol or instrument, e.g. NVDA"
+    required: true
+  - name: run_dir
+    description: "Vibe run directory containing artifacts/moirix"
+    required: true

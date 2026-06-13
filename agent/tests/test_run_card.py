@@ -277,11 +277,67 @@ def test_api_run_response_surfaces_moirix_artifact_previews(tmp_path: Path) -> N
         '{"authority":{"ready_for_real_money_trading_authority":false}}\n',
         encoding="utf-8",
     )
-    (moirix_dir / "moirix_summary.md").write_text("# Moirix\n\nStatus: `ok`\n", encoding="utf-8")
-    (moirix_dir / "event_signal.csv").write_text(
-        "known_at,symbol,event_type,pit_valid\n2025-01-02,NVDA,fixture,true\n",
+    (moirix_dir / "event_thesis_graph.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "vibe.moirix_event_thesis.v1",
+                "target": "NVDA",
+                "market": "US",
+                "as_of": "2025-01-02",
+                "current_thesis": {"stance": "bullish", "actionability": "watch"},
+            }
+        ),
         encoding="utf-8",
     )
+    (moirix_dir / "event_thesis_report.md").write_text("# Event Thesis\n\nWatch only.\n", encoding="utf-8")
+    (moirix_dir / "event_decision_context.json").write_text(
+        '{"schema_version":"vibe.moirix_event_decision_context.v1","status":"ok","positions":[]}\n',
+        encoding="utf-8",
+    )
+    (moirix_dir / "position_decision.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "vibe.moirix_position_decision.v1",
+                "status": "ok",
+                "target": "NVDA",
+                "action": "add",
+                "authority": {"ready_for_real_money_trading_authority": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (moirix_dir / "trade_proposal.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "vibe.moirix_trade_proposal.v1",
+                "status": "proposed",
+                "orders": [{"symbol": "NVDA", "side": "buy", "quantity": 1}],
+                "authority": {"broker_submit_allowed": False, "ready_for_real_money_trading_authority": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (moirix_dir / "risk_sizing_report.json").write_text(
+        '{"schema_version":"vibe.moirix_risk_sizing.v1","status":"ok","risk_sizing":{"max_loss_notional":250}}\n',
+        encoding="utf-8",
+    )
+    (moirix_dir / "decision_projection.csv").write_text(
+        "known_at,symbol,action,side,broker_submit_allowed\n2025-01-02,NVDA,add,buy,false\n",
+        encoding="utf-8",
+    )
+    (moirix_dir / "decision_projection.json").write_text(
+        '{"schema_version":"vibe.moirix_decision_projection.v1","status":"ok","rows":[{"symbol":"NVDA"}]}\n',
+        encoding="utf-8",
+    )
+    (moirix_dir / "backtest_projection_manifest.json").write_text(
+        '{"schema_version":"vibe.moirix_backtest_projection_manifest.v1","status":"ok","row_count":1}\n',
+        encoding="utf-8",
+    )
+    (moirix_dir / "execution_status.json").write_text(
+        '{"schema_version":"vibe.moirix_trade_execution_status.v1","status":"blocked","claim_gate":{"blockers":["approval_missing"]}}\n',
+        encoding="utf-8",
+    )
+    (moirix_dir / "portfolio_adjustment_plan.md").write_text("# Position Plan\n\nPaper proposal only.\n", encoding="utf-8")
     (authority_check_dir / "status.json").write_text('{"status":"blocked"}\n', encoding="utf-8")
     (authority_check_dir / "request.json").write_text('{"proposal_scope":"live_trading"}\n', encoding="utf-8")
     (authority_check_dir / "moirix_authority_status.json").write_text(
@@ -293,12 +349,21 @@ def test_api_run_response_surfaces_moirix_artifact_previews(tmp_path: Path) -> N
 
     artifact_names = {artifact.name for artifact in response.artifacts}
     assert "moirix/status.json" in artifact_names
-    assert "moirix/event_signal.csv" in artifact_names
+    assert "moirix/event_thesis_graph.json" in artifact_names
     assert "moirix/authority_checks/proposal-abc12345/status.json" in artifact_names
     assert response.moirix_artifacts is not None
     assert response.moirix_artifacts["status"]["status"] == "ok"
-    assert response.moirix_artifacts["event_signal_preview"][0]["symbol"] == "NVDA"
-    assert response.moirix_artifacts["moirix_summary_markdown"].startswith("# Moirix")
+    assert response.moirix_artifacts["event_thesis_graph"]["current_thesis"]["stance"] == "bullish"
+    assert response.moirix_artifacts["event_thesis_report_markdown"].startswith("# Event Thesis")
+    assert response.moirix_artifacts["event_decision_context"]["status"] == "ok"
+    assert response.moirix_artifacts["position_decision"]["action"] == "add"
+    assert response.moirix_artifacts["trade_proposal"]["orders"][0]["symbol"] == "NVDA"
+    assert response.moirix_artifacts["risk_sizing_report"]["risk_sizing"]["max_loss_notional"] == 250
+    assert response.moirix_artifacts["decision_projection"]["rows"][0]["symbol"] == "NVDA"
+    assert response.moirix_artifacts["decision_projection_preview"][0]["symbol"] == "NVDA"
+    assert response.moirix_artifacts["backtest_projection_manifest"]["row_count"] == 1
+    assert response.moirix_artifacts["execution_status"]["status"] == "blocked"
+    assert response.moirix_artifacts["portfolio_adjustment_plan_markdown"].startswith("# Position Plan")
     assert response.moirix_artifacts["authority_checks"][0]["id"] == "proposal-abc12345"
     assert response.moirix_artifacts["authority_checks"][0]["status"]["status"] == "blocked"
 

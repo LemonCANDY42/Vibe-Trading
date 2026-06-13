@@ -1,3 +1,14 @@
+> Status: historical PRD, superseded for active implementation by
+> `wiki/docs/moirix/MOIRIX_EXTENSION_PLAN.md` and
+> `wiki/docs/kenny/CURRENT_GOAL.md`.
+>
+> The original numeric `event_impact_graph.json` / `event_signal.csv` path is
+> no longer the canonical Moirix workflow in this fork. Current work uses PIT
+> evidence plus Agent-synthesized `event_thesis_graph.json`,
+> `event_thesis_report.md`, `event_decision_context.json`,
+> `position_decision.json`, `trade_proposal.json`, and a fail-closed
+> `execution_status.json` gate.
+
 **以 Vibe-Trading fork 作为主自用工作台，Moirix 集成进 fork，保持上游 Vibe-Trading 可持续同步，同时让 fork 拥有 Moirix 的新闻/事件影响图/可信边界能力。**
 
 ------

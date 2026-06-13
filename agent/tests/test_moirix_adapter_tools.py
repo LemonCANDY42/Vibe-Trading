@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-import shutil
 import sys
+import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -13,11 +14,13 @@ import src.tools as tools_pkg
 import src.tools._moirix_adapter as moirix_adapter
 from src.tools import build_registry
 from src.tools.moirix_authority_guard_tool import MoirixAuthorityGuardTool
-from src.tools.moirix_event_graph_tool import MoirixEventGraphTool
-from src.tools.moirix_event_signal_backtest_tool import MoirixEventSignalBacktestTool
-from src.tools.moirix_event_signal_tool import MoirixEventSignalTool
+from src.tools.moirix_decision_projection_tool import MoirixDecisionProjectionTool
+from src.tools.moirix_event_thesis_tool import MoirixEventThesisTool
 from src.tools.moirix_news_tool import MoirixNewsTool
+from src.tools.moirix_portfolio_context_tool import MoirixPortfolioContextTool
+from src.tools.moirix_position_decision_tool import MoirixPositionDecisionTool
 from src.tools.moirix_status_tool import MoirixStatusTool
+from src.tools.moirix_trade_execution_tool import MoirixTradeExecutionTool
 
 
 FALSE_AUTHORITY = {
@@ -35,7 +38,6 @@ STANDARD_MOIRIX_ARTIFACT_KEYS = {
     "coverage_status",
     "authority_status",
     "moirix_authority_status",
-    "moirix_summary",
     "vibe_run_card_patch",
 }
 
@@ -69,7 +71,6 @@ def write_common(out, status):
     )
     (out / "authority_status.json").write_text(json.dumps(AUTHORITY), encoding="utf-8")
     (out / "moirix_authority_status.json").write_text(json.dumps(AUTHORITY), encoding="utf-8")
-    (out / "moirix_summary.md").write_text(f"status={status}\n", encoding="utf-8")
     (out / "vibe_run_card_patch.json").write_text(json.dumps({"status": status}), encoding="utf-8")
     return {
         "status": str(out / "status.json"),
@@ -77,7 +78,6 @@ def write_common(out, status):
         "coverage_status": str(out / "coverage_status.json"),
         "authority_status": str(out / "authority_status.json"),
         "moirix_authority_status": str(out / "moirix_authority_status.json"),
-        "moirix_summary": str(out / "moirix_summary.md"),
         "vibe_run_card_patch": str(out / "vibe_run_card_patch.json"),
     }
 
@@ -87,7 +87,7 @@ if command == "status":
         "schema_version": "moirix.vibe_adapter.status.v1",
         "status": "ok",
         "adapter_version": "0.1.0",
-        "supported_commands": ["status", "query-news", "build-event-graph", "export-vibe-artifacts", "authority-check"],
+        "supported_commands": ["status", "query-news", "authority-check"],
         "supported_scopes": ["research_only", "paper_proposal_only"],
         "authority": AUTHORITY,
         "claim_gate": {"blockers": []},
@@ -108,45 +108,14 @@ elif command == "query-news":
         "evidence_coverage": {"blocked_without_fake_evidence": True},
         "artifacts": common,
     }))
-elif command == "build-event-graph":
-    input_path = Path(arg("--input")).resolve()
-    out = Path(arg("--out")).resolve()
-    common = write_common(out, "ok")
-    graph_path = out / "event_impact_graph.json"
-    graph = {
-        "schema_version": "moirix.vibe_adapter.event_impact_graph.v1",
-        "status": "ok",
-        "target": arg("--target"),
-        "as_of": arg("--as-of"),
-        "nodes": [{"id": "event:fixture", "kind": "event", "label": "Fixture event"}],
-        "edges": [],
-        "impacted_instruments": [],
-        "authority": AUTHORITY,
-        "evidence_coverage": {"input_path": str(input_path), "input_row_count": 1},
-    }
-    graph_path.write_text(json.dumps(graph), encoding="utf-8")
-    (out / "event_signal.csv").write_text(
-        "known_at,symbol,event_type,sentiment_score,impact_score,confidence,source_count,decay_half_life_days,source_tier,pit_valid\n"
-        "2025-04-30T21:30:00Z,NVDA,fixture,0.7,0.48,0.8,1,5,pit_source_lake,true\n",
-        encoding="utf-8",
-    )
-    print(json.dumps({
-        **graph,
-        "artifacts": {
-            "event_impact_graph": str(graph_path),
-            "event_signal": str(out / "event_signal.csv"),
-            "news_evidence": str(input_path),
-            **common,
-        },
-    }))
 elif command == "artifact-escape":
     out = Path(arg("--out")).resolve()
     print(json.dumps({
-        "schema_version": "moirix.vibe_adapter.event_impact_graph.v1",
+        "schema_version": "moirix.vibe_adapter.status.v1",
         "status": "ok",
         "authority": AUTHORITY,
         "claim_gate": {"blockers": []},
-        "artifacts": {"event_impact_graph": str(out.parent / "escape.json")},
+        "artifacts": {"event_thesis_graph": str(out.parent / "escape.json")},
     }))
 elif command == "unknown-status":
     print(json.dumps({
@@ -162,29 +131,6 @@ elif command == "top-level-authority-violation":
         "ready_for_real_money_trading_authority": True,
         "authority": AUTHORITY,
         "claim_gate": {"blockers": []},
-    }))
-elif command == "export-vibe-artifacts":
-    run_root = Path(arg("--run-root")).resolve()
-    out = Path(arg("--out")).resolve()
-    out.mkdir(parents=True, exist_ok=True)
-    copied = []
-    artifacts = {}
-    signal = run_root / "event_signal.csv"
-    if signal.is_file():
-        target = out / "event_signal.csv"
-        if signal.resolve() != target.resolve():
-            shutil.copy2(signal, target)
-        copied.append("event_signal.csv")
-        artifacts["event_signal"] = str(target)
-    common = write_common(out, "ok" if copied else "blocked")
-    artifacts.update(common)
-    print(json.dumps({
-        "schema_version": "moirix.vibe_adapter.vibe_artifact_export.v1",
-        "status": "ok" if copied else "blocked",
-        "authority": AUTHORITY,
-        "claim_gate": {"blockers": [] if copied else ["run_root_has_no_known_moirix_adapter_artifacts"]},
-        "copied_artifacts": copied,
-        "artifacts": artifacts,
     }))
 elif command == "authority-check":
     out = Path(arg("--out")).resolve()
@@ -220,6 +166,119 @@ def _use_fake_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MOIRIX_ADAPTER_CWD", str(tmp_path))
 
 
+def _valid_thesis() -> dict[str, object]:
+    return {
+        "schema_version": "vibe.moirix_event_thesis.v1",
+        "target": "NVDA",
+        "market": "US",
+        "as_of": "2025-05-01",
+        "evidence_items": [
+            {
+                "event_id": "event:fixture",
+                "summary": "Fixture event affected AI accelerator demand expectations.",
+                "truth_status": "likely",
+                "source_quality": "medium",
+                "target_relevance": "direct",
+                "impact_path": "revenue",
+                "impact_direction": "positive",
+                "impact_horizon": "weeks",
+                "invalidated_by": ["company filing contradicts demand claim"],
+                "analysis": "The event supports a short-term demand thesis but still needs filing confirmation.",
+            }
+        ],
+        "relations": [
+            {
+                "source_event_id": "event:fixture",
+                "target_event_id": "event:fixture",
+                "relation_type": "confirms",
+                "explanation": "Single fixture event anchors the initial thesis.",
+            }
+        ],
+        "current_thesis": {
+            "stance": "bullish",
+            "actionability": "watch",
+            "summary": "Evidence supports a watch-only bullish thesis.",
+            "execution_window": {
+                "start": "2025-05-01",
+                "end": "2025-05-20",
+                "reason": "Potential repricing window before next company update.",
+            },
+            "supporting_events": ["event:fixture"],
+            "contradicting_events": [],
+            "open_questions": ["Is the demand signal already priced?"],
+            "invalidation_triggers": ["newer verified report contradicts demand"],
+        },
+        "authority": {
+            "research_only": True,
+            "paper_trade_proposal_allowed": False,
+            "broker_submit_allowed": False,
+            "ready_for_real_money_trading_authority": False,
+        },
+    }
+
+
+def _valid_decision() -> dict[str, object]:
+    return {
+        "schema_version": "vibe.moirix_position_decision.v1",
+        "target": "NVDA",
+        "market": "US",
+        "as_of": "2025-05-01",
+        "action": "add",
+        "rationale": "Thesis remains watch-only bullish, but a small paper add would test execution discipline.",
+        "execution_window": {
+            "start": "2025-05-02",
+            "end": "2025-05-10",
+            "reason": "Use the next liquidity window after evidence visibility.",
+        },
+        "risk_sizing": {
+            "max_position_notional": 2500,
+            "max_loss_notional": 250,
+            "portfolio_impact": "small incremental exposure",
+        },
+        "risk_notes": ["paper-only sizing", "stop if thesis is contradicted"],
+        "invalidation_triggers": ["new verified report supersedes demand signal"],
+        "proposed_orders": [
+            {
+                "symbol": "NVDA",
+                "side": "buy",
+                "order_type": "limit",
+                "quantity": 1,
+                "limit_price": 100,
+                "time_in_force": "day",
+            }
+        ],
+        "authority": {
+            "research_only": True,
+            "paper_trade_proposal_allowed": False,
+            "broker_submit_allowed": False,
+            "ready_for_real_money_trading_authority": False,
+        },
+    }
+
+
+def _write_thesis_and_context(run_dir: Path) -> None:
+    out = run_dir / "artifacts" / "moirix"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "event_thesis_graph.json").write_text(json.dumps(_valid_thesis()), encoding="utf-8")
+    (out / "event_decision_context.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "vibe.moirix_event_decision_context.v1",
+                "status": "ok",
+                "target": "NVDA",
+                "positions": [{"symbol": "NVDA", "position": 10, "avg_cost": 90.0}],
+                "account_summary": {"AvailableFunds_USD": "100000.00"},
+                "authority": {
+                    "research_only": True,
+                    "broker_submit_allowed": False,
+                    "ready_for_real_money_trading_authority": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_moirix_tools_are_discoverable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tools_pkg, "_SUBCLASSES_CACHE", None)
 
@@ -227,9 +286,11 @@ def test_moirix_tools_are_discoverable(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert "moirix_status" in registry.tool_names
     assert "moirix_query_news" in registry.tool_names
-    assert "moirix_build_event_graph" in registry.tool_names
-    assert "moirix_export_event_signal" in registry.tool_names
-    assert "moirix_event_signal_backtest" in registry.tool_names
+    assert "moirix_write_event_thesis" in registry.tool_names
+    assert "moirix_portfolio_context" in registry.tool_names
+    assert "moirix_write_position_decision" in registry.tool_names
+    assert "moirix_export_decision_projection" in registry.tool_names
+    assert "moirix_execute_trade_proposal" in registry.tool_names
     assert "moirix_authority_guard" in registry.tool_names
 
 
@@ -274,66 +335,429 @@ def test_query_news_preserves_blocked_and_writes_no_fake_evidence(
     assert STANDARD_MOIRIX_ARTIFACT_KEYS <= set(payload["artifacts"])
 
 
-def test_build_event_graph_uses_run_artifacts(
+def test_write_event_thesis_requires_pit_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _use_fake_adapter(tmp_path, monkeypatch)
+    run_dir = _run_dir(tmp_path, monkeypatch)
+
+    payload = json.loads(
+        MoirixEventThesisTool().execute(
+            run_dir=str(run_dir),
+            thesis_json=_valid_thesis(),
+        )
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_event_thesis_evidence_missing" in payload["claim_gate"]["blockers"]
+    assert not (run_dir / "artifacts" / "moirix" / "event_thesis_graph.json").exists()
+
+
+def test_write_event_thesis_persists_canonical_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     run_dir = _run_dir(tmp_path, monkeypatch)
     evidence = run_dir / "artifacts" / "moirix" / "news_evidence.jsonl"
     evidence.parent.mkdir(parents=True, exist_ok=True)
     evidence.write_text('{"event_id":"event:fixture","visible_at":"2025-04-30T00:00:00Z"}\n', encoding="utf-8")
 
     payload = json.loads(
-        MoirixEventGraphTool().execute(
-            target="NVDA",
-            as_of="2025-05-01",
+        MoirixEventThesisTool().execute(
             run_dir=str(run_dir),
+            thesis_json=_valid_thesis(),
         )
     )
 
-    graph_path = run_dir / "artifacts" / "moirix" / "event_impact_graph.json"
+    out = run_dir / "artifacts" / "moirix"
+    thesis_path = out / "event_thesis_graph.json"
+    report_path = out / "event_thesis_report.md"
+    authority_path = out / "authority_status.json"
     assert payload["status"] == "ok"
-    assert payload["artifacts"]["event_impact_graph"] == str(graph_path)
-    assert graph_path.exists()
-    assert (run_dir / "artifacts" / "moirix" / "event_signal.csv").exists()
-    assert STANDARD_MOIRIX_ARTIFACT_KEYS <= set(payload["artifacts"])
-    for name in ("status.json", "request.json", "coverage_status.json", "authority_status.json"):
-        assert (run_dir / "artifacts" / "moirix" / name).exists()
+    assert payload["artifacts"]["event_thesis_graph"] == str(thesis_path)
+    assert thesis_path.exists()
+    assert report_path.exists()
+    assert authority_path.exists()
+    thesis = json.loads(thesis_path.read_text(encoding="utf-8"))
+    assert thesis["current_thesis"]["stance"] == "bullish"
+    assert thesis["authority"]["broker_submit_allowed"] is False
+    assert "strength" not in json.dumps(thesis)
 
 
-def test_export_event_signal_requires_existing_signal_artifact(
+def test_write_event_thesis_rejects_legacy_numeric_graph_fields(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _use_fake_adapter(tmp_path, monkeypatch)
     run_dir = _run_dir(tmp_path, monkeypatch)
+    evidence = run_dir / "artifacts" / "moirix" / "news_evidence.jsonl"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text('{"event_id":"event:fixture"}\n', encoding="utf-8")
+    thesis = _valid_thesis()
+    assert isinstance(thesis["evidence_items"], list)
+    thesis["evidence_items"][0]["confidence"] = 0.8  # type: ignore[index]
 
-    payload = json.loads(MoirixEventSignalTool().execute(run_dir=str(run_dir)))
+    payload = json.loads(
+        MoirixEventThesisTool().execute(
+            run_dir=str(run_dir),
+            thesis_json=thesis,
+        )
+    )
 
     assert payload["status"] == "blocked"
-    assert "moirix_event_signal_missing" in payload["claim_gate"]["blockers"]
+    assert "moirix_event_thesis_schema_invalid" in payload["claim_gate"]["blockers"]
+    assert any("confidence" in item for item in payload["violations"])
+    assert not (run_dir / "artifacts" / "moirix" / "event_thesis_graph.json").exists()
 
 
-def test_export_event_signal_uses_run_artifact(
+def test_portfolio_context_blocks_without_readonly_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _use_fake_adapter(tmp_path, monkeypatch)
     run_dir = _run_dir(tmp_path, monkeypatch)
-    signal = run_dir / "artifacts" / "moirix" / "event_signal.csv"
-    signal.parent.mkdir(parents=True, exist_ok=True)
-    signal.write_text(
-        "known_at,symbol,event_type,sentiment_score,impact_score,confidence,source_count,decay_half_life_days,source_tier,pit_valid\n",
+
+    payload = json.loads(
+        MoirixPortfolioContextTool().execute(
+            run_dir=str(run_dir),
+            target="NVDA",
+            market="US",
+            as_of="2025-05-01",
+        )
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_ibkr_readiness_missing" in payload["claim_gate"]["blockers"]
+    assert payload["positions"] == []
+    assert (run_dir / "artifacts" / "moirix" / "event_decision_context.json").exists()
+
+
+def test_portfolio_context_uses_ibkr_readiness_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    readiness = run_dir / "artifacts" / "ibkr" / "ibkr_paper_readiness.json"
+    readiness.parent.mkdir(parents=True, exist_ok=True)
+    readiness.write_text(
+        json.dumps(
+            {
+                "schema_version": "vibe.ibkr_paper_readiness.v1",
+                "status": "blocked",
+                "claim_gate": {"blockers": ["ibkr_paper_market_data_blocked"]},
+                "checks": {
+                    "account_summary": {
+                        "payload": {
+                            "summary": [
+                                {"tag": "AvailableFunds", "currency": "USD", "value": "1000000.00"},
+                                {"tag": "BuyingPower", "currency": "USD", "value": "4000000.00"},
+                            ]
+                        }
+                    },
+                    "positions": {
+                        "payload": {
+                            "positions": [
+                                {"symbol": "NVDA", "position": 10, "avg_cost": 100.0},
+                            ]
+                        }
+                    },
+                    "open_orders_and_executions": {"payload": {"open_orders": [], "executions": []}},
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
-    payload = json.loads(MoirixEventSignalTool().execute(run_dir=str(run_dir)))
+    payload = json.loads(
+        MoirixPortfolioContextTool().execute(
+            run_dir=str(run_dir),
+            target="NVDA",
+            market="US",
+            as_of="2025-05-01",
+        )
+    )
 
     assert payload["status"] == "ok"
-    assert "event_signal.csv" in payload["copied_artifacts"]
-    assert payload["artifacts"]["event_signal"] == str(signal)
-    assert STANDARD_MOIRIX_ARTIFACT_KEYS <= set(payload["artifacts"])
+    assert payload["account_summary"]["AvailableFunds_USD"] == "1000000.00"
+    assert payload["positions"][0]["symbol"] == "NVDA"
+    assert payload["authority"]["broker_submit_allowed"] is False
+
+
+def test_write_position_decision_requires_thesis_and_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+
+    payload = json.loads(
+        MoirixPositionDecisionTool().execute(
+            run_dir=str(run_dir),
+            decision_json=json.dumps(_valid_decision()),
+        )
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_position_decision_inputs_missing" in payload["claim_gate"]["blockers"]
+    assert not (run_dir / "artifacts" / "moirix" / "position_decision.json").exists()
+
+
+def test_write_position_decision_persists_research_only_proposal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+
+    payload = json.loads(
+        MoirixPositionDecisionTool().execute(
+            run_dir=str(run_dir),
+            decision_json=json.dumps(_valid_decision()),
+        )
+    )
+
+    out = run_dir / "artifacts" / "moirix"
+    assert payload["status"] == "ok"
+    assert (out / "position_decision.json").exists()
+    assert (out / "trade_proposal.json").exists()
+    assert (out / "risk_sizing_report.json").exists()
+    assert (out / "portfolio_adjustment_plan.md").exists()
+    decision = json.loads((out / "position_decision.json").read_text(encoding="utf-8"))
+    proposal = json.loads((out / "trade_proposal.json").read_text(encoding="utf-8"))
+    assert decision["action"] == "add"
+    assert proposal["orders"][0]["symbol"] == "NVDA"
+    assert proposal["execution_gate"]["requires_explicit_approval"] is True
+    assert proposal["authority"]["paper_trade_proposal_allowed"] is False
+    assert proposal["authority"]["broker_submit_allowed"] is False
+    assert proposal["authority"]["ready_for_real_money_trading_authority"] is False
+
+
+def test_write_position_decision_rejects_legacy_numeric_fields_and_empty_action_orders(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    decision = _valid_decision()
+    decision["impact_score"] = 0.5
+    decision["proposed_orders"] = []
+
+    payload = json.loads(
+        MoirixPositionDecisionTool().execute(
+            run_dir=str(run_dir),
+            decision_json=json.dumps(decision),
+        )
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_position_decision_schema_invalid" in payload["claim_gate"]["blockers"]
+    assert any("impact_score" in item for item in payload["violations"])
+    assert "proposed_orders must be non-empty for actionable decisions" in payload["violations"]
+    assert not (run_dir / "artifacts" / "moirix" / "trade_proposal.json").exists()
+
+
+def test_execute_trade_proposal_blocks_without_explicit_approval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
+
+    payload = json.loads(
+        MoirixTradeExecutionTool().execute(
+            run_dir=str(run_dir),
+            connection="ibkr-paper-local",
+            dry_run=True,
+        )
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_execution_approval_missing" in payload["claim_gate"]["blockers"]
+    assert (run_dir / "artifacts" / "moirix" / "execution_status.json").exists()
+
+
+def test_export_decision_projection_writes_backtest_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
+
+    payload = json.loads(
+        MoirixDecisionProjectionTool().execute(
+            run_dir=str(run_dir),
+            projection_mode="window",
+        )
+    )
+
+    out = run_dir / "artifacts" / "moirix"
+    assert payload["status"] == "ok"
+    assert payload["row_count"] == 1
+    assert (out / "decision_projection.csv").exists()
+    assert (out / "decision_projection.json").exists()
+    assert (out / "backtest_projection_manifest.json").exists()
+    csv_text = (out / "decision_projection.csv").read_text(encoding="utf-8")
+    assert "NVDA" in csv_text
+    assert "broker_submit_allowed" in csv_text
+    manifest = json.loads((out / "backtest_projection_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["usage"].startswith("Backtest projection only")
+    assert manifest["authority"]["broker_submit_allowed"] is False
+
+
+def test_execute_trade_proposal_blocks_readonly_paper_connection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
+    proposal_path = run_dir / "artifacts" / "moirix" / "trade_proposal.json"
+    approval_path = run_dir / "artifacts" / "moirix" / "execution_approval.json"
+    approval_path.write_text(
+        json.dumps(
+            {
+                "approved": True,
+                "scope": "paper",
+                "proposal_sha256": hashlib.sha256(proposal_path.read_bytes()).hexdigest(),
+                "authority": {
+                    "paper_trade_proposal_allowed": True,
+                    "broker_submit_allowed": True,
+                    "ready_for_real_money_trading_authority": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = json.loads(
+        MoirixTradeExecutionTool().execute(
+            run_dir=str(run_dir),
+            approval_path=str(approval_path),
+            connection="ibkr-paper-local",
+            dry_run=True,
+        )
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_execution_profile_readonly" in payload["claim_gate"]["blockers"]
+    assert "moirix_execution_profile_lacks_orders_place" in payload["claim_gate"]["blockers"]
+
+
+def test_execute_trade_proposal_requires_approval_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
+    proposal_path = run_dir / "artifacts" / "moirix" / "trade_proposal.json"
+    approval_path = run_dir / "artifacts" / "moirix" / "execution_approval.json"
+    approval_path.write_text(
+        json.dumps(
+            {
+                "approved": True,
+                "scope": "paper",
+                "proposal_sha256": hashlib.sha256(proposal_path.read_bytes()).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = json.loads(
+        MoirixTradeExecutionTool().execute(
+            run_dir=str(run_dir),
+            approval_path=str(approval_path),
+            connection="ibkr-paper-local",
+            dry_run=True,
+        )
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_execution_approval_missing_paper_authority" in payload["claim_gate"]["blockers"]
+    assert "moirix_execution_approval_missing_broker_submit_authority" in payload["claim_gate"]["blockers"]
+
+
+def test_execute_trade_proposal_dry_run_passes_with_explicit_paper_approval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
+    proposal_path = run_dir / "artifacts" / "moirix" / "trade_proposal.json"
+    approval_path = run_dir / "artifacts" / "moirix" / "execution_approval.json"
+    approval_path.write_text(
+        json.dumps(
+            {
+                "approved": True,
+                "scope": "paper",
+                "proposal_sha256": hashlib.sha256(proposal_path.read_bytes()).hexdigest(),
+                "authority": {
+                    "paper_trade_proposal_allowed": True,
+                    "broker_submit_allowed": True,
+                    "ready_for_real_money_trading_authority": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = json.loads(
+        MoirixTradeExecutionTool().execute(
+            run_dir=str(run_dir),
+            approval_path=str(approval_path),
+            connection="alpaca-paper-trade",
+            dry_run=True,
+        )
+    )
+
+    assert payload["status"] == "dry_run"
+    assert payload["claim_gate"]["blockers"] == []
+    assert payload["broker_results"] == []
+    assert payload["authority"]["paper_trade_proposal_allowed"] is True
+    assert payload["authority"]["broker_submit_allowed"] is False
+    assert payload["authority"]["ready_for_real_money_trading_authority"] is False
+
+
+def test_operator_approval_helper_generates_execution_approval(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(_valid_decision()))
+    helper = Path(__file__).resolve().parents[1] / "scripts" / "moirix_approve_paper_execution.py"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(helper),
+            "--run-dir",
+            str(run_dir),
+            "--approved-by",
+            "pytest",
+            "--reason",
+            "paper dry-run test",
+            "--phrase",
+            "APPROVE PAPER EXECUTION",
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    helper_payload = json.loads(result.stdout)
+    approval_path = Path(helper_payload["approval_path"])
+
+    payload = json.loads(
+        MoirixTradeExecutionTool().execute(
+            run_dir=str(run_dir),
+            approval_path=str(approval_path),
+            connection="alpaca-paper-trade",
+            dry_run=True,
+        )
+    )
+
+    assert approval_path.exists()
+    assert payload["status"] == "dry_run"
 
 
 def test_authority_guard_preserves_blocked(
@@ -367,104 +791,6 @@ def test_authority_guard_preserves_blocked(
     assert json.loads(main_status.read_text(encoding="utf-8"))["status"] == "main_graph_ok"
 
 
-def test_event_signal_backtest_consumes_signal_and_price_csv(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run_dir = _run_dir(tmp_path, monkeypatch)
-    out = run_dir / "artifacts" / "moirix"
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "event_signal.csv").write_text(
-        "\n".join(
-            [
-                "known_at,symbol,event_type,sentiment_score,impact_score,confidence,source_count,decay_half_life_days,source_tier,pit_valid",
-                "2025-01-02,NVDA,fixture,0.7,0.5,0.8,1,5,pit_source_lake,true",
-                "2025-01-03,SMH,fixture,-0.2,-0.3,0.6,1,5,pit_source_lake,true",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (out / "price_series.csv").write_text(
-        "\n".join(
-            [
-                "date,symbol,close",
-                "2025-01-02,NVDA,100",
-                "2025-01-03,NVDA,110",
-                "2025-01-06,NVDA,121",
-                "2025-01-07,NVDA,115",
-                "2025-01-08,NVDA,130",
-                "2025-01-09,NVDA,140",
-                "2025-01-03,SMH,200",
-                "2025-01-06,SMH,190",
-                "2025-01-07,SMH,180",
-                "2025-01-08,SMH,175",
-                "2025-01-09,SMH,170",
-                "2025-01-10,SMH,160",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    payload = json.loads(
-        MoirixEventSignalBacktestTool().execute(
-            run_dir=str(run_dir),
-            horizons=[1, 3, 5],
-        )
-    )
-
-    assert payload["status"] == "ok"
-    assert payload["claim_gate"]["ready_for_real_money_trading_authority"] is False
-    assert payload["summary"]["horizon_stats"]["1"]["count"] == 2
-    assert (out / "event_signal_forward_returns.csv").exists()
-    assert (out / "event_signal_backtest_summary.json").exists()
-
-
-def test_event_signal_backtest_blocks_without_price_csv(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    run_dir = _run_dir(tmp_path, monkeypatch)
-    out = run_dir / "artifacts" / "moirix"
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "event_signal.csv").write_text(
-        "known_at,symbol,event_type,sentiment_score,impact_score,confidence,source_count,decay_half_life_days,source_tier,pit_valid\n"
-        "2025-01-02,NVDA,fixture,0.7,0.5,0.8,1,5,pit_source_lake,true\n",
-        encoding="utf-8",
-    )
-
-    payload = json.loads(MoirixEventSignalBacktestTool().execute(run_dir=str(run_dir)))
-
-    assert payload["status"] == "blocked"
-    assert "moirix_event_signal_price_csv_missing" in payload["claim_gate"]["blockers"]
-    assert not (out / "event_signal_forward_returns.csv").exists()
-    assert (out / "event_signal_backtest_summary.json").exists()
-
-
-def test_event_graph_rejects_input_outside_allowed_roots(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _use_fake_adapter(tmp_path, monkeypatch)
-    run_dir = _run_dir(tmp_path, monkeypatch)
-    outside = tmp_path / "outside.jsonl"
-    outside.write_text("{}\n", encoding="utf-8")
-
-    payload = json.loads(
-        MoirixEventGraphTool().execute(
-            target="NVDA",
-            as_of="2025-05-01",
-            input_path=str(outside),
-            run_dir=str(run_dir),
-        )
-    )
-
-    assert payload["status"] == "error"
-    assert "moirix_event_graph_input_rejected" in payload["claim_gate"]["blockers"]
-    assert not (run_dir / "artifacts" / "moirix" / "event_impact_graph.json").exists()
-
-
 def test_adapter_artifact_paths_must_stay_under_output_dir(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -480,7 +806,7 @@ def test_adapter_artifact_paths_must_stay_under_output_dir(
 
     assert payload["status"] == "blocked"
     assert "moirix_artifact_contract_violation" in payload["claim_gate"]["blockers"]
-    assert "event_impact_graph:outside_artifacts_root" in payload["violations"]
+    assert "event_thesis_graph:outside_artifacts_root" in payload["violations"]
 
 
 def test_unknown_adapter_status_is_blocked_with_claim_gate_dict(
@@ -512,9 +838,10 @@ def test_moirix_tools_do_not_expose_broker_submit_parameters() -> None:
     tools = [
         MoirixStatusTool(),
         MoirixNewsTool(),
-        MoirixEventGraphTool(),
-        MoirixEventSignalTool(),
-        MoirixEventSignalBacktestTool(),
+        MoirixEventThesisTool(),
+        MoirixPortfolioContextTool(),
+        MoirixPositionDecisionTool(),
+        MoirixDecisionProjectionTool(),
         MoirixAuthorityGuardTool(),
     ]
 

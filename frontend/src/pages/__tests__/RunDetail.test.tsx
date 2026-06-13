@@ -22,9 +22,9 @@ vi.mock("@/components/charts/EquityChart", () => ({
   EquityChart: () => <div data-testid="equity-chart" />,
 }));
 
-function renderRunDetail() {
+function renderRunDetail(initialEntry = "/runs/run-1") {
   return render(
-    <MemoryRouter initialEntries={["/runs/run-1"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/runs/:runId" element={<RunDetail />} />
       </Routes>
@@ -91,5 +91,74 @@ describe("RunDetail chart loading", () => {
     await waitFor(() => expect(screen.getByText("3 / 3 (100%)")).toBeInTheDocument());
     expect(apiMock.getRun).toHaveBeenCalledWith("run-1", { chart_symbol: "BBB" });
     expect(apiMock.getRun).toHaveBeenCalledWith("run-1", { chart_symbol: "CCC" });
+  });
+
+  it("renders Moirix event thesis and decision context tabs", async () => {
+    apiMock.getRun.mockResolvedValue(makeRun("AAA", {
+      moirix_artifacts: {
+        event_thesis_graph: {
+          current_thesis: {
+            stance: "bullish",
+            actionability: "watch",
+            execution_window: { start: "2025-05-01", end: "2025-05-20", reason: "fixture" },
+          },
+          evidence_items: [{ event_id: "event:1", truth_status: "likely", summary: "Fixture event" }],
+          relations: [{ source_event_id: "event:1", relation_type: "confirms", target_event_id: "event:1", explanation: "Fixture" }],
+        },
+        event_thesis_report_markdown: "# Event Thesis\n\nWatch only.",
+        event_decision_context: {
+          status: "ok",
+          position_counts: { positions: 1, open_orders: 0, executions: 0 },
+          account_summary: { AvailableFunds_USD: "1000000.00" },
+          portfolio_source: { type: "ibkr_paper_readiness", status: "blocked" },
+          positions: [{ symbol: "NVDA", position: 10 }],
+        },
+        position_decision: {
+          status: "ok",
+          action: "add",
+          execution_window: { start: "2025-05-02", end: "2025-05-10", reason: "fixture" },
+          risk_sizing: { max_loss_notional: 250 },
+        },
+        trade_proposal: {
+          status: "proposed",
+          orders: [{ symbol: "NVDA", side: "buy", quantity: 1, order_type: "limit", limit_price: 100 }],
+        },
+        risk_sizing_report: {
+          status: "ok",
+          risk_sizing: { max_loss_notional: 250 },
+        },
+        decision_projection_preview: [
+          { known_at: "2025-05-01", symbol: "NVDA", action: "add", side: "buy" },
+        ],
+        backtest_projection_manifest: {
+          status: "ok",
+          row_count: 1,
+        },
+        execution_status: {
+          status: "blocked",
+          claim_gate: { blockers: ["approval_missing"] },
+        },
+        portfolio_adjustment_plan_markdown: "# Portfolio Adjustment Plan\n\nPaper proposal only.",
+      },
+      artifacts: [{ name: "moirix/event_thesis_graph.json", path: "/tmp/event_thesis_graph.json", type: "json", size: 10, exists: true }],
+    }));
+
+    renderRunDetail("/runs/run-1?tab=moirixThesis");
+
+    expect(await screen.findByText("Event Thesis Report")).toBeInTheDocument();
+    expect(screen.getAllByText("bullish").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("watch").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Decision Context/i }));
+    expect(await screen.findByText("Account Summary")).toBeInTheDocument();
+    expect(screen.getByText("1000000.00")).toBeInTheDocument();
+    expect(screen.getByText("NVDA")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Position Decision/i }));
+    expect((await screen.findAllByText("Portfolio Adjustment Plan")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("add").length).toBeGreaterThan(0);
+    expect(screen.getByText("Trade Proposal")).toBeInTheDocument();
+    expect(screen.getByText("Backtest Projection")).toBeInTheDocument();
+    expect(screen.getAllByText("blocked").length).toBeGreaterThan(0);
   });
 });

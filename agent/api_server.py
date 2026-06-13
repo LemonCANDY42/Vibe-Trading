@@ -1193,21 +1193,34 @@ def _load_moirix_artifact_previews(run_dir: Path) -> Optional[Dict[str, Any]]:
         "status": "status.json",
         "request": "request.json",
         "coverage_status": "coverage_status.json",
-        "event_impact_graph": "event_impact_graph.json",
+        "event_thesis_graph": "event_thesis_graph.json",
+        "event_decision_context": "event_decision_context.json",
+        "position_decision": "position_decision.json",
+        "trade_proposal": "trade_proposal.json",
+        "risk_sizing_report": "risk_sizing_report.json",
+        "decision_projection": "decision_projection.json",
+        "backtest_projection_manifest": "backtest_projection_manifest.json",
+        "execution_status": "execution_status.json",
         "authority_status": "authority_status.json",
         "moirix_authority_status": "moirix_authority_status.json",
         "vibe_run_card_patch": "vibe_run_card_patch.json",
-        "event_signal_backtest_summary": "event_signal_backtest_summary.json",
     }
     for key, filename in json_files.items():
         value = _load_json_file(moirix_dir / filename)
         if value is not None:
             payload[key] = value
 
-    summary_path = moirix_dir / "moirix_summary.md"
-    if summary_path.is_file():
+    thesis_report_path = moirix_dir / "event_thesis_report.md"
+    if thesis_report_path.is_file():
         try:
-            payload["moirix_summary_markdown"] = summary_path.read_text(encoding="utf-8")[:20000]
+            payload["event_thesis_report_markdown"] = thesis_report_path.read_text(encoding="utf-8")[:40000]
+        except OSError:
+            pass
+
+    adjustment_plan_path = moirix_dir / "portfolio_adjustment_plan.md"
+    if adjustment_plan_path.is_file():
+        try:
+            payload["portfolio_adjustment_plan_markdown"] = adjustment_plan_path.read_text(encoding="utf-8")[:40000]
         except OSError:
             pass
 
@@ -1215,13 +1228,9 @@ def _load_moirix_artifact_previews(run_dir: Path) -> Optional[Dict[str, Any]]:
     if news_path.is_file():
         payload["news_evidence_preview"] = _load_jsonl_preview(news_path, limit=20)
 
-    for key, filename in (
-        ("event_signal_preview", "event_signal.csv"),
-        ("event_signal_forward_returns_preview", "event_signal_forward_returns.csv"),
-    ):
-        path = moirix_dir / filename
-        if path.is_file():
-            payload[key] = _load_csv_to_dict(path, limit=20)
+    projection_path = moirix_dir / "decision_projection.csv"
+    if projection_path.is_file():
+        payload["decision_projection_preview"] = _load_csv_to_dict(projection_path, limit=20)
 
     authority_checks = _load_moirix_authority_checks(moirix_dir)
     if authority_checks:
@@ -1229,7 +1238,6 @@ def _load_moirix_artifact_previews(run_dir: Path) -> Optional[Dict[str, Any]]:
 
     if not payload:
         return None
-    payload["artifact_names"] = sorted(path.relative_to(moirix_dir).as_posix() for path in moirix_dir.rglob("*") if path.is_file())
     return payload
 
 
@@ -1252,12 +1260,6 @@ def _load_moirix_authority_checks(moirix_dir: Path) -> List[Dict[str, Any]]:
             value = _load_json_file(check_dir / filename)
             if value is not None:
                 item[key] = value
-        summary_path = check_dir / "moirix_summary.md"
-        if summary_path.is_file():
-            try:
-                item["moirix_summary_markdown"] = summary_path.read_text(encoding="utf-8")[:10000]
-            except OSError:
-                pass
         if len(item) > 1:
             checks.append(item)
     return checks

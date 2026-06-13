@@ -2,6 +2,10 @@
 
 Date: 2026-06-12
 
+> Status: historical review. The active Moirix implementation has moved from
+> numeric event-impact graph / event_signal artifacts to the Agent-driven event
+> thesis workflow documented in `wiki/docs/moirix/MOIRIX_EXTENSION_PLAN.md`.
+
 Scope:
 
 - Vibe fork: `/Users/kennymccormick/github/Vibe-Trading-Kenny`

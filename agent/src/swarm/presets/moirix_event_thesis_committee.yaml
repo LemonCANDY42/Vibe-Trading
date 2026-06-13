@@ -1,0 +1,227 @@
+name: moirix_event_thesis_committee
+title: "Moirix Event Thesis Committee"
+description: "PIT evidence -> semantic event relations -> portfolio context -> bull/bear debate -> research-only event thesis."
+
+agents:
+  - id: evidence_analyst
+    role: PIT Evidence Analyst
+    system_prompt: |
+      You query Moirix point-in-time evidence and preserve source-lake boundaries.
+
+      Task:
+      - Check Moirix adapter status.
+      - Query PIT evidence for {target} in {market} as of {as_of}, looking back {lookback_days} days.
+      - Preserve ok, blocked, and unavailable states exactly.
+      - Do not fabricate news coverage.
+      - Do not build weighted event graphs or event_signal CSVs.
+    tools: [read_file, write_file, load_skill, moirix_status, moirix_query_news, web_search, read_url]
+    skills: [moirix-event-graph, event-driven, web-reader]
+    max_iterations: 24
+    timeout_seconds: 900
+    max_retries: 1
+
+  - id: contradiction_auditor
+    role: Contradiction Auditor
+    system_prompt: |
+      You identify how the evidence items relate to each other.
+
+      {upstream_context}
+
+      Task:
+      - Mark duplicate, updating, superseding, confirming, weakening, and contradicting relationships.
+      - Separate source facts from inference.
+      - Explain why a new event changes or does not change older event credibility.
+      - Do not use strength, weight, numeric confidence, or impact_score.
+    tools: [read_file, write_file, load_skill]
+    skills: [moirix-event-graph, risk-analysis]
+    max_iterations: 20
+    timeout_seconds: 900
+    max_retries: 1
+
+  - id: sector_supply_chain_analyst
+    role: Sector And Supply Chain Analyst
+    system_prompt: |
+      You analyze industry, peer, upstream, downstream, and macro transmission.
+
+      {upstream_context}
+
+      Task:
+      - Identify likely sector or supply-chain impact paths for {target}.
+      - State whether effects are direct, indirect, sector-wide, macro, or irrelevant.
+      - Identify related assets that may be affected, but do not propose orders.
+    tools: [read_file, write_file, load_skill]
+    skills: [moirix-event-graph, macro-analysis, global-macro]
+    max_iterations: 20
+    timeout_seconds: 900
+    max_retries: 1
+
+  - id: target_impact_analyst
+    role: Target Impact Analyst
+    system_prompt: |
+      You translate event evidence into target-level business and market impact paths.
+
+      {upstream_context}
+
+      Task:
+      - Analyze revenue, margin, valuation, liquidity, sentiment, supply-chain, and policy paths.
+      - Assign semantic direction: positive, negative, mixed, neutral, or uncertain.
+      - Assign semantic horizon: intraday, days, weeks, months, or unknown.
+      - Do not use numeric weights or numeric confidence.
+    tools: [read_file, write_file, load_skill]
+    skills: [moirix-event-graph, fundamental-filter, risk-analysis]
+    max_iterations: 20
+    timeout_seconds: 900
+    max_retries: 1
+
+  - id: portfolio_context_analyst
+    role: Portfolio Context Analyst
+    system_prompt: |
+      You attach read-only portfolio context to the event thesis.
+
+      {upstream_context}
+
+      Task:
+      - Use existing read-only IBKR paper readiness or portfolio snapshot artifacts when available.
+      - Call moirix_portfolio_context for {target}, {market}, and {as_of}.
+      - If portfolio context is unavailable, preserve blocked/unavailable and do not invent holdings.
+      - Do not call broker write, order, cancel, custody, or live-trading tools.
+    tools: [read_file, write_file, load_skill, ibkr_paper_readiness, moirix_portfolio_context]
+    skills: [moirix-event-graph, risk-analysis]
+    max_iterations: 20
+    timeout_seconds: 900
+    max_retries: 1
+
+  - id: bull_bear_researchers
+    role: Bull Bear Researchers
+    system_prompt: |
+      You construct balanced bull and bear arguments from the evidence and portfolio context.
+
+      {upstream_context}
+
+      Task:
+      - Write the strongest bull case and strongest bear case.
+      - Label evidence, inference, uncertainty, and missing confirmation.
+      - Identify what would invalidate each side.
+      - Do not provide direct trading orders.
+    tools: [read_file, write_file, load_skill]
+    skills: [moirix-event-graph, risk-analysis]
+    max_iterations: 20
+    timeout_seconds: 900
+    max_retries: 1
+
+  - id: risk_reviewer
+    role: Risk And Authority Reviewer
+    system_prompt: |
+      You review event thesis actionability, risk, and authority.
+
+      {upstream_context}
+
+      Task:
+      - Identify future-leakage risks, missing visible_at fields, source gaps, and unsupported claims.
+      - Decide whether the result is actionable, watch-only, not actionable, or blocked.
+      - Confirm broker_submit_allowed=false and ready_for_real_money_trading_authority=false.
+      - Do not approve live trading.
+    tools: [read_file, write_file, load_skill, moirix_authority_guard]
+    skills: [moirix-event-graph, risk-analysis]
+    max_iterations: 20
+    timeout_seconds: 900
+    max_retries: 1
+
+  - id: decision_synthesizer
+    role: Event Thesis Synthesizer
+    system_prompt: |
+      You synthesize the final canonical Moirix event thesis.
+
+      {upstream_context}
+
+      Task:
+      - Write event_thesis_graph.json using schema vibe.moirix_event_thesis.v1.
+      - Write semantic relations only: supports, contradicts, supersedes, updates, duplicates, weakens, confirms, or causal_chain.
+      - Do not include strength, weight, numeric confidence, or impact_score.
+      - Include current thesis stance, actionability, execution window, open questions, invalidation triggers, and authority.
+      - Call moirix_write_event_thesis with thesis_json and report_markdown.
+    tools: [read_file, write_file, load_skill, moirix_write_event_thesis]
+    skills: [moirix-event-graph, risk-analysis]
+    max_iterations: 24
+    timeout_seconds: 900
+    max_retries: 1
+
+tasks:
+  - id: task-evidence
+    agent_id: evidence_analyst
+    prompt_template: "Query Moirix PIT evidence for {target} in {market} as of {as_of} with a {lookback_days}-day lookback. Preserve ok/blocked/unavailable status and artifact paths."
+    depends_on: []
+
+  - id: task-contradictions
+    agent_id: contradiction_auditor
+    prompt_template: "Analyze event-to-event relationships for {target}: duplicates, updates, contradictions, supersessions, confirmations, and weaknesses. Use semantic relations only."
+    depends_on: [task-evidence]
+    input_from:
+      evidence: task-evidence
+
+  - id: task-sector
+    agent_id: sector_supply_chain_analyst
+    prompt_template: "Analyze sector, peer, supply-chain, and macro transmission paths for {target} using the Moirix evidence."
+    depends_on: [task-evidence]
+    input_from:
+      evidence: task-evidence
+
+  - id: task-target-impact
+    agent_id: target_impact_analyst
+    prompt_template: "Analyze target-level impact paths for {target}: revenue, margin, valuation, liquidity, sentiment, supply-chain, policy, and horizon."
+    depends_on: [task-contradictions, task-sector]
+    input_from:
+      evidence: task-evidence
+      relations: task-contradictions
+      sector_paths: task-sector
+
+  - id: task-portfolio
+    agent_id: portfolio_context_analyst
+    prompt_template: "Attach read-only portfolio context for {target} in {market} as of {as_of}. If unavailable, preserve blocked/unavailable and do not invent holdings."
+    depends_on: [task-evidence]
+    input_from:
+      evidence: task-evidence
+
+  - id: task-debate
+    agent_id: bull_bear_researchers
+    prompt_template: "Build balanced bull and bear arguments for {target} using evidence, semantic relations, target impact, and portfolio context."
+    depends_on: [task-target-impact, task-portfolio]
+    input_from:
+      target_impact: task-target-impact
+      portfolio_context: task-portfolio
+
+  - id: task-risk
+    agent_id: risk_reviewer
+    prompt_template: "Review actionability, risk, invalidation triggers, authority boundaries, and future-leakage risks for {target}."
+    depends_on: [task-debate]
+    input_from:
+      debate: task-debate
+      evidence: task-evidence
+      portfolio_context: task-portfolio
+
+  - id: task-synthesis
+    agent_id: decision_synthesizer
+    prompt_template: "Synthesize and persist the canonical Moirix event thesis artifacts for {target}. Use event_thesis_graph.json, event_thesis_report.md, and event_decision_context.json as the canonical workflow output."
+    depends_on: [task-risk]
+    input_from:
+      evidence: task-evidence
+      relations: task-contradictions
+      sector_paths: task-sector
+      target_impact: task-target-impact
+      portfolio_context: task-portfolio
+      debate: task-debate
+      risk_review: task-risk
+
+variables:
+  - name: target
+    description: "Target symbol or instrument, e.g. NVDA"
+    required: true
+  - name: market
+    description: "Market label, e.g. US, HK, A-share"
+    required: true
+  - name: as_of
+    description: "Point-in-time cutoff date/time, e.g. 2025-05-01"
+    required: true
+  - name: lookback_days
+    description: "Lookback window in calendar days, e.g. 30"
+    required: true

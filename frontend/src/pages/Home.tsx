@@ -9,6 +9,7 @@ import {
   Database,
   FileCheck2,
   FileText,
+  Gauge,
   GitCompare,
   Loader2,
   PlayCircle,
@@ -287,9 +288,9 @@ function MoirixResearchSection({ runs, loading, error }: MoirixResearchSectionPr
             <Database className="h-3.5 w-3.5" />
             Kenny fork
           </div>
-          <h2 className="mt-3 text-lg font-semibold">Moirix Research Evidence</h2>
+          <h2 className="mt-3 text-lg font-semibold">Moirix Event Thesis</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Recent PIT news evidence, event-impact graph, event signal, and authority artifacts from optional local Moirix runs.
+            Recent PIT evidence, Agent-synthesized event theses, portfolio decision context, and authority artifacts from optional local Moirix runs.
           </p>
         </div>
         {loading && (
@@ -308,7 +309,7 @@ function MoirixResearchSection({ runs, loading, error }: MoirixResearchSectionPr
 
       {!loading && !error && runs.length === 0 ? (
         <div className="mt-4 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          No Moirix run artifacts found in recent runs. Ordinary Vibe workflows are unaffected.
+          No Moirix event thesis or position decision artifacts found in recent runs. Ordinary Vibe workflows are unaffected.
         </div>
       ) : null}
 
@@ -330,8 +331,9 @@ interface MoirixRunSummary {
   status: string;
   statusTone: PillTone;
   evidence: string;
-  graph: string;
-  signal: string;
+  thesis: string;
+  decision: string;
+  position: string;
   authority: string;
   authorityFalse: boolean;
   caveat?: string;
@@ -362,8 +364,14 @@ function MoirixRunCard({ run }: { run: MoirixRunSummary }) {
           <Link to={`/runs/${run.runId}?tab=moirixEvidence`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
             Evidence
           </Link>
-          <Link to={`/runs/${run.runId}?tab=moirixGraph`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
-            Graph
+          <Link to={`/runs/${run.runId}?tab=moirixThesis`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
+            Thesis
+          </Link>
+          <Link to={`/runs/${run.runId}?tab=moirixDecision`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
+            Context
+          </Link>
+          <Link to={`/runs/${run.runId}?tab=moirixPosition`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
+            Position
           </Link>
           <Link to={`/runs/${run.runId}?tab=moirixAuthority`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
             Authority
@@ -371,10 +379,11 @@ function MoirixRunCard({ run }: { run: MoirixRunSummary }) {
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <MoirixStatusTile icon={Database} label="Evidence" value={run.evidence} />
-        <MoirixStatusTile icon={BarChart3} label="Graph" value={run.graph} />
-        <MoirixStatusTile icon={FileCheck2} label="Signal / Backtest" value={run.signal} />
+        <MoirixStatusTile icon={FileCheck2} label="Thesis" value={run.thesis} />
+        <MoirixStatusTile icon={BarChart3} label="Decision Context" value={run.decision} />
+        <MoirixStatusTile icon={Gauge} label="Position Decision" value={run.position} />
         <MoirixStatusTile
           icon={ShieldCheck}
           label="Authority"
@@ -445,13 +454,29 @@ function MetricPill({ label, value }: { label: string; value: string }) {
 function toMoirixRunSummary(run: RunListItem, detail: RunData): MoirixRunSummary | null {
   if (!hasMoirixArtifacts(detail)) return null;
   const artifacts = asRecord(detail.moirix_artifacts);
+  if (
+    !artifacts?.event_thesis_graph
+    && !artifacts?.event_decision_context
+    && !artifacts?.event_thesis_report_markdown
+    && !artifacts?.position_decision
+  ) return null;
   const status = statusLabel(artifacts?.status) || inferMoirixStatus(detail);
   const statusTone = toneForStatus(status);
   const coverage = asRecord(artifacts?.coverage_status);
+  const thesis = asRecord(artifacts?.event_thesis_graph);
+  const decisionContext = asRecord(artifacts?.event_decision_context);
+  const positionDecision = asRecord(artifacts?.position_decision);
+  const tradeProposal = asRecord(artifacts?.trade_proposal);
+  const executionStatus = asRecord(artifacts?.execution_status);
   const authority = asRecord(artifacts?.authority_status) || asRecord(artifacts?.moirix_authority_status);
   const authorityReady = hasReadyForRealMoneyFalse(
     artifacts?.status,
     artifacts?.coverage_status,
+    artifacts?.event_thesis_graph,
+    artifacts?.event_decision_context,
+    artifacts?.position_decision,
+    artifacts?.trade_proposal,
+    artifacts?.execution_status,
     artifacts?.authority_status,
     artifacts?.moirix_authority_status,
     artifacts?.vibe_run_card_patch,
@@ -464,8 +489,9 @@ function toMoirixRunSummary(run: RunListItem, detail: RunData): MoirixRunSummary
     status,
     statusTone,
     evidence: summarizeEvidence(artifacts, coverage),
-    graph: artifacts?.event_impact_graph ? "graph artifact present" : status === "blocked" || status === "unavailable" ? status : "not recorded",
-    signal: summarizeSignal(artifacts),
+    thesis: summarizeThesis(thesis),
+    decision: summarizeDecisionContext(decisionContext),
+    position: summarizePositionDecision(positionDecision, tradeProposal, executionStatus),
     authority: statusLabel(authority) || statusLabel(asRecord(artifacts?.vibe_run_card_patch)) || (authority || authorityReady ? "checked" : "not recorded"),
     authorityFalse: authorityReady,
     caveat: firstString(coverage, ["caveat", "warning", "confidence_caveat", "coverage_caveat"]) || firstString(artifacts, ["caveat", "warning"]),
@@ -485,12 +511,41 @@ function summarizeEvidence(artifacts: Record<string, unknown> | null, coverage: 
   return artifacts?.news_evidence_preview ? "preview available" : "not recorded";
 }
 
-function summarizeSignal(artifacts: Record<string, unknown> | null): string {
-  const signalRows = countRows(artifacts?.event_signal_preview);
-  const forwardRows = countRows(artifacts?.event_signal_forward_returns_preview);
-  if (artifacts?.event_signal_backtest_summary) return "backtest summary present";
-  if (signalRows || forwardRows) return `${signalRows || forwardRows} preview rows`;
+function summarizeThesis(thesis: Record<string, unknown> | null): string {
+  const current = asRecord(thesis?.current_thesis);
+  const stance = firstString(current, ["stance"]);
+  const actionability = firstString(current, ["actionability"]);
+  if (stance && actionability) return `${stance} · ${actionability}`;
+  if (stance || actionability) return stance || actionability;
+  if (thesis) return "thesis recorded";
   return "not recorded";
+}
+
+function summarizeDecisionContext(context: Record<string, unknown> | null): string {
+  const counts = asRecord(context?.position_counts);
+  const status = statusLabel(context);
+  if (counts) {
+    const positions = Number(counts.positions ?? 0);
+    const orders = Number(counts.open_orders ?? 0);
+    if (Number.isFinite(positions) || Number.isFinite(orders)) {
+      return `${Number.isFinite(positions) ? positions : 0} positions · ${Number.isFinite(orders) ? orders : 0} orders`;
+    }
+  }
+  return status || (context ? "context recorded" : "not recorded");
+}
+
+function summarizePositionDecision(
+  decision: Record<string, unknown> | null,
+  proposal: Record<string, unknown> | null,
+  execution: Record<string, unknown> | null,
+): string {
+  const action = firstString(decision, ["action"]);
+  const status = statusLabel(decision);
+  const orders = Array.isArray(proposal?.orders) ? proposal.orders.length : 0;
+  const executionStatus = statusLabel(execution);
+  if (action && orders > 0) return `${action} · ${orders} proposed`;
+  if (action) return executionStatus ? `${action} · ${executionStatus}` : action;
+  return status || (decision ? "decision recorded" : "not recorded");
 }
 
 function inferMoirixStatus(run: RunData): string {

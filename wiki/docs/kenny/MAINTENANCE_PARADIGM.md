@@ -2,37 +2,36 @@
 
 Status: standard for `Vibe-Trading-Kenny` maintenance work.
 
-This document turns the PRD's recommended working style into the default
-maintenance workflow for this personal fork. It applies to non-trivial feature,
-integration, architecture, docs, review, and upstream-sync work.
-
 ## Core Position
 
 `Vibe-Trading-Kenny` is Kenny's personal trading research agent workbench.
 
+The Moirix thesis, position-decision, backtest projection, and paper
+execution-gate workflow is a Kenny-fork-only extension. It must not be proposed
+as a general `HKUDS/Vibe-Trading` upstream feature in this shape. Upstream PRs
+should stay generic and Moirix-free unless a future project decision explicitly
+creates a plugin contract accepted by upstream maintainers.
+
 The maintenance model is:
 
 ```text
-Vibe-Trading core stays primary and upstream-compatible.
-Moirix stays an optional local extension.
+Vibe stays the primary workbench.
+Moirix stays an optional local PIT evidence provider.
+Agent synthesis produces event theses.
+Position decision agents turn theses into research-only portfolio proposals.
 Research and simulation stay default.
-Broker submit and real-money authority stay fail-closed.
+Broker submit stays behind a separate explicit execution gate.
+Real-money authority stays fail-closed.
 ```
-
-This is suitable because it preserves the existing Vibe surface area: CLI/TUI,
-web UI, MCP server, agent loop, skills, swarms, sessions, memory, data loaders,
-backtest engines, and broker connector boundaries. Moirix contributes only the
-parts that are differentiated: PIT evidence status, event-impact graph
-artifacts, coverage/leakage checks, and authority boundaries.
 
 ## Source Documents
 
 Read these before changing the Moirix/Vibe integration path:
 
-- `wiki/docs/kenny/PRD_PERSONAL_VIBE_MOIRIX_FORK.md`
 - `wiki/docs/kenny/CURRENT_GOAL.md`
-- `wiki/docs/kenny/UPSTREAM_SYNC_POLICY.md`
 - `wiki/docs/moirix/MOIRIX_EXTENSION_PLAN.md`
+- `wiki/docs/kenny/UPSTREAM_SYNC_POLICY.md`
+- `wiki/docs/kenny/PRD_PERSONAL_VIBE_MOIRIX_FORK.md`
 - `/Users/kennymccormick/github/Moirix/docs/VIBE_EXTENSION_CONTRACT.md`
 - `/Users/kennymccormick/github/Moirix/docs/VIBE_NEWS_EVENT_GRAPH_ADAPTER.md`
 
@@ -47,37 +46,31 @@ Before implementation, state:
 
 - the concrete user outcome;
 - the source of truth;
-- the current stage, such as V0, V1, or deferred;
-- what is in scope;
-- what is explicitly out of scope;
-- the exact tests, smoke commands, or review evidence required.
+- the current stage;
+- in-scope and out-of-scope surfaces;
+- tests, smoke commands, and review evidence required.
 
 Use `wiki/docs/kenny/CURRENT_GOAL.md` for the active branch-level target when
 the work changes integration scope or acceptance criteria.
 
 ### 2. Keep Vibe First
 
-Do not rebuild Vibe capabilities that already exist:
+Prefer routing, skills, tools, artifacts, and UI previews over Vibe core
+rewrites. Do not rebuild Vibe capabilities that already exist: AgentLoop,
+sessions, memory, skills, swarms, run artifacts, data loaders, backtest engines,
+web UI, MCP server, and broker connector boundaries.
 
-- CLI/TUI;
-- FastAPI/web surfaces;
-- MCP server;
-- agent loop;
-- session and memory systems;
-- skills and swarms;
-- data loaders;
-- backtest engines;
-- Alpha Zoo;
-- broker connector surfaces.
+Keep upstream-facing work separate from Kenny-only Moirix work:
 
-Prefer routing, skills, tools, artifacts, and docs over core rewrites.
+- upstream-friendly branches may contain generic run library, usage, reports,
+  live-status, chart-payload, or framework fixes;
+- Kenny-only branches may contain Moirix source-lake assumptions, local adapter
+  paths, Moirix thesis and decision tools, and fork-specific execution gates;
+- never mix the two categories in one PR or commit intended for upstream.
 
 ### 3. Keep Moirix Optional
 
-Moirix integration should be callable through optional local tools and stable
-adapter contracts. Vibe must continue to run when Moirix is missing.
-
-Required behavior:
+Moirix integration must continue to run as optional local tools:
 
 - missing adapter returns `status: "unavailable"`;
 - blocked source coverage returns `status: "blocked"`;
@@ -85,73 +78,128 @@ Required behavior:
 - unknown adapter status is converted to `status: "blocked"`;
 - Vibe reports the Moirix state directly rather than fabricating PIT evidence.
 
-### 4. Isolate Custom Code
+### 4. Use Thesis-First Event Reasoning
 
-Prefer new files under:
+The canonical Moirix workflow is:
 
 ```text
-wiki/docs/kenny/
-wiki/docs/moirix/
-agent/src/tools/_moirix_adapter.py
-agent/src/tools/moirix_*.py
-agent/src/skills/moirix-*/
-agent/src/swarm/presets/moirix_*.yaml
-agent/tests/test_moirix_*.py
+moirix_status
+  -> moirix_query_news
+  -> moirix_portfolio_context
+  -> moirix_write_event_thesis
+  -> moirix_write_position_decision when a thesis becomes a proposal
+  -> moirix_export_decision_projection when a proposal should be backtested
+  -> moirix_execute_trade_proposal only with explicit execution approval
+  -> moirix_authority_guard when needed
 ```
 
-Edits to upstream-heavy files must stay small and explainable. Expected touch
-points are registry, routing, counts, and docs index files.
+Do not reintroduce the removed numeric graph/signal path as a primary workflow:
 
-### 5. Keep Research-Only Authority
+- no `event_impact_graph.json` as canonical output;
+- no edge `strength`;
+- no edge `weight`;
+- no numeric `confidence`;
+- no `impact_score`;
+- no `event_signal.csv` as the main Moirix output.
 
-Never introduce a direct path from Moirix graph scores to orders.
+The canonical artifacts are:
+
+```text
+artifacts/moirix/news_evidence.jsonl
+artifacts/moirix/event_thesis_graph.json
+artifacts/moirix/event_thesis_report.md
+artifacts/moirix/event_decision_context.json
+artifacts/moirix/position_decision.json
+artifacts/moirix/trade_proposal.json
+artifacts/moirix/risk_sizing_report.json
+artifacts/moirix/portfolio_adjustment_plan.md
+artifacts/moirix/decision_projection.csv
+artifacts/moirix/decision_projection.json
+artifacts/moirix/backtest_projection_manifest.json
+artifacts/moirix/execution_status.json
+artifacts/moirix/authority_status.json
+artifacts/moirix/vibe_run_card_patch.json
+```
+
+### 5. Keep Decision And Execution Separated
+
+Never introduce a direct path from Moirix evidence or Agent thesis output to
+orders. A valid path must pass through all of these layers:
+
+```text
+event thesis
+  -> position decision
+  -> trade proposal
+  -> optional backtest projection for historical evaluation
+  -> explicit execution approval
+  -> execution gate
+  -> existing Vibe trading connector / live mandate guard
+```
+
+The thesis and decision agents must not self-enable execution. The execution
+gate must verify the exact proposal hash and fail closed when approval,
+connector capability, profile environment, or authority is ambiguous.
+
+Backtest projection is not execution. Projection artifacts may be used by Vibe
+backtests, but they must remain research-only and carry false broker/real-money
+authority fields.
+
+The proposal remains research-only by default. A separate paper execution
+approval artifact may grant `paper_trade_proposal_allowed=true` and
+`broker_submit_allowed=true`, but it must keep
+`ready_for_real_money_trading_authority=false` and match the exact proposal
+hash.
 
 The following must remain blocked unless a future PRD explicitly changes the
 contract and adds independent review evidence:
 
-- broker submit;
+- broker submit without explicit execution approval;
 - silent order placement;
 - real-money execution;
 - agent self-enabling of kill switches;
-- claiming trading authority from event graph confidence.
+- claiming trading authority from event thesis output.
 
-Check both top-level and nested authority fields from adapter payloads. Any
-true real-money or broker-submit authority field must fail closed.
+Required authority fields:
+
+```json
+{
+  "research_only": true,
+  "paper_trade_proposal_allowed": false,
+  "broker_submit_allowed": false,
+  "ready_for_real_money_trading_authority": false
+}
+```
+
+Paper execution may be added only as a separate, auditable workflow. Live
+execution remains out of scope for the current Moirix decision layer.
 
 ### 5.1 IBKR Paper Read-Only Discipline
 
 The logged-in IB Gateway paper account may be used only for read-only readiness
-checks unless a later PRD explicitly authorizes a paper-order workflow.
-Use `ibkr_paper_readiness` as the standard readiness artifact path; do not
-compose ad-hoc order or cancel API calls for this purpose.
+and portfolio-context artifacts unless a later PRD explicitly authorizes a
+paper-order workflow.
 
-Gateway state does not grant project authority. If IB Gateway has "Read-Only
-API" disabled, treat the environment as capable of broker writes and enforce
-read-only behavior in the Vibe/Moirix code path.
-
-Allowed in the current PRD:
+Allowed:
 
 - connectivity checks;
 - account summary reads;
 - positions reads;
-- open orders inspection;
+- open order inspection;
 - executions/history inspection;
 - market-data permission checks;
 - historical-data permission checks.
 
-Forbidden in the current PRD:
+Forbidden:
 
 - `placeOrder`;
 - `cancelOrder`;
 - `reqGlobalCancel`;
 - order transmit;
 - simulated submit;
-- live submit;
-- any helper that lets event graph confidence become a broker write.
+- live submit.
 
-Avoid API client-id behavior that binds, modifies, cancels, or otherwise
-changes manually entered orders. If a read-only check cannot be implemented
-without such behavior, return `blocked` and document the blocker.
+If read-only portfolio context is unavailable, return `blocked` or
+`unavailable`. Do not fabricate positions.
 
 ### 6. Label Evidence Precisely
 
@@ -160,41 +208,37 @@ and user-uploaded files are different evidence tiers.
 
 Rules:
 
-- do not call `web_search` or `read_url` PIT-valid unless Moirix explicitly
-  proves it;
-- do not route news through `backtest/loaders`;
+- do not call `web_search` or `read_url` PIT-valid unless Moirix proves it;
+- do not route news through market-data loaders;
 - do not claim universal coverage from a partial source window;
-- show source gaps and coverage blockers in the run artifact or final report.
+- show source gaps and coverage blockers in artifacts or final reports.
 
 ### 7. Verify The Production Path
 
-Match tests to the changed surface.
-
-For current Moirix V0 maintenance, the default validation set is:
+Default validation for Moirix event thesis work:
 
 ```bash
 git diff --check
 node --check wiki/docs/content.js
 
-uv run --extra dev python -m pytest agent/tests/test_moirix_adapter_tools.py -q
+PYTHONPATH=agent .venv/bin/pytest agent/tests/test_moirix_adapter_tools.py -q
+PYTHONPATH=agent .venv/bin/pytest agent/tests/test_run_card.py -q
+PYTHONPATH=agent .venv/bin/pytest agent/tests/test_mcp_regression.py agent/tests/test_mcp_server_smoke.py -q
 
-uv run --extra dev python -m pytest \
-  agent/tests/test_swarm_presets_packaging.py \
-  agent/tests/test_swarm_preset_inspect.py \
-  agent/tests/test_skills.py -q
+npm run test:run -- src/pages/__tests__/Home.test.tsx src/pages/__tests__/RunDetail.test.tsx
+npm run build
 ```
 
-When the real local Moirix checkout is relevant, also run a smoke that proves:
+When real local Moirix is relevant, also run a smoke that proves:
 
 ```text
 moirix_status -> ok or unavailable
 moirix_query_news -> ok or blocked, preserving blockers
-moirix_build_event_graph -> ok from run-local evidence fixture
+moirix_write_event_thesis -> ok from run-local evidence fixture
+moirix_portfolio_context -> ok from read-only snapshot or blocked without fake positions
 ```
 
 ### 8. Review Before Commit
-
-Use review as a gate, not a postscript.
 
 Review for:
 
@@ -202,59 +246,18 @@ Review for:
 - optional-missing behavior;
 - fail-closed blocked/unavailable states;
 - path traversal and artifact-root safety;
-- top-level and nested authority violations;
+- authority violations;
 - absence of broker/order/live-trading surfaces;
-- accurate PIT vs ad-hoc evidence labels;
+- accurate PIT vs ad-hoc labels;
 - tests that exercise the production path.
 
 Record meaningful reviews under `wiki/docs/kenny/REVIEW_*.md` when the change
 alters this integration pattern or promotes a new stage.
 
-## Stage Rules
-
-### Current V0 Pattern
-
-Allowed:
-
-- optional local adapter wrapper;
-- `moirix_status`;
-- `moirix_query_news`;
-- `moirix_build_event_graph`;
-- `moirix-event-graph` skill;
-- `moirix_event_impact_desk` swarm;
-- run artifacts under `artifacts/moirix/`;
-- authority-check artifacts under
-  `artifacts/moirix/authority_checks/<proposal-id>/` to avoid overwriting the
-  primary graph/signal `status.json` and `coverage_status.json`;
-- fail-closed status preservation.
-
-Deferred:
-
-- `moirix_export_event_signal` until adapter `export-vibe-artifacts` can expose
-  or copy `event_signal.csv` under the frozen contract;
-- `moirix_authority_guard` until adapter `authority-check` is stable;
-- frontend Moirix panels;
-- IBKR paper read-only readiness;
-- paper submit;
-- real-money authority.
-
-### Promotion Criteria
-
-Only promote a deferred stage when all are true:
-
-- the upstream or Moirix contract is stable enough to wrap;
-- the implementation is isolated from Vibe core where possible;
-- docs define the new runtime sequence and fail states;
-- targeted tests cover success, blocked, unavailable, and unsafe inputs;
-- an independent review finds no remaining blocking findings.
-
 ## Commit And Sync Discipline
 
-Keep commits logically scoped:
-
-- one commit for a coherent V0 foundation is acceptable;
-- split docs/runtime/frontend/broker stages when their risks differ;
-- do not mix IBKR, frontend, and event-signal export into unrelated changes.
+Keep commits logically scoped. Do not mix upstream-friendly PR work with
+Kenny-only Moirix thesis changes.
 
 Before pushing or syncing with upstream:
 
@@ -269,11 +272,11 @@ After an upstream merge, rerun the relevant validation set and update
 
 ## Stop Conditions
 
-Stop and ask before proceeding when:
+Stop and report clearly if:
 
-- the change requires broker credentials, order submission, or real-money
-  authority;
-- the Moirix adapter contract no longer matches the Vibe wrapper;
-- upstream merge conflicts would require broad Vibe core rewrites;
-- the requested work crosses from research artifacts into execution authority;
-- a fallback would hide missing PIT coverage or source-lake blockers.
+- Moirix adapter behavior contradicts the documented PIT evidence contract;
+- a tool would need broker write authority to continue;
+- a path-safety check cannot prove artifacts stay inside the run directory;
+- an Agent output cannot be validated without reintroducing numeric graph
+  semantics;
+- tests show ordinary Vibe workflows break when Moirix is missing.

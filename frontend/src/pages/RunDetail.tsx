@@ -30,7 +30,7 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 
 const rehypePlugins = [rehypeHighlight];
 
-type Tab = "chart" | "trades" | "runCard" | "code" | "validation" | "moirixEvidence" | "moirixGraph" | "moirixAuthority";
+type Tab = "chart" | "trades" | "runCard" | "code" | "validation" | "moirixEvidence" | "moirixThesis" | "moirixDecision" | "moirixPosition" | "moirixAuthority";
 type ChartPayload = Pick<RunData, "price_series" | "indicator_series" | "trade_markers">;
 type ChartCache = Record<string, ChartPayload>;
 type ChartLoadProgress = { done: number; total: number };
@@ -45,7 +45,9 @@ function parseTab(value: string | null): Tab {
     case "code":
     case "validation":
     case "moirixEvidence":
-    case "moirixGraph":
+    case "moirixThesis":
+    case "moirixDecision":
+    case "moirixPosition":
     case "moirixAuthority":
       return value;
     default:
@@ -139,8 +141,10 @@ export function RunDetail() {
     { id: "validation", label: "Validation", icon: ShieldCheck, hidden: !hasValidation },
     { id: "runCard", label: "Run Card", icon: FileCheck2, hidden: !hasRunCard },
     { id: "moirixEvidence", label: "Moirix Evidence", icon: Database, hidden: !hasMoirix },
-    { id: "moirixGraph", label: "Moirix Graph", icon: BarChart3, hidden: !hasMoirix },
-    { id: "moirixAuthority", label: "Moirix Authority", icon: ShieldCheck, hidden: !hasMoirix },
+    { id: "moirixThesis", label: "Event Thesis", icon: FileCheck2, hidden: !hasMoirix },
+    { id: "moirixDecision", label: "Decision Context", icon: Fingerprint, hidden: !hasMoirix },
+    { id: "moirixPosition", label: "Position Decision", icon: Gauge, hidden: !hasMoirix },
+    { id: "moirixAuthority", label: "Authority", icon: ShieldCheck, hidden: !hasMoirix },
     { id: "code", label: "Code", icon: Code2 },
   ];
 
@@ -353,7 +357,9 @@ export function RunDetail() {
           {tab === "validation" && run.validation && <ValidationPanel data={run.validation} />}
           {tab === "runCard" && run.run_card && <RunCardTab card={run.run_card} />}
           {tab === "moirixEvidence" && <MoirixTab run={run} kind="evidence" />}
-          {tab === "moirixGraph" && <MoirixTab run={run} kind="graph" />}
+          {tab === "moirixThesis" && <MoirixTab run={run} kind="thesis" />}
+          {tab === "moirixDecision" && <MoirixTab run={run} kind="decision" />}
+          {tab === "moirixPosition" && <MoirixTab run={run} kind="position" />}
           {tab === "moirixAuthority" && <MoirixTab run={run} kind="authority" />}
           {tab === "code" && <CodeTab code={code} />}
         </ErrorBoundary>
@@ -366,6 +372,14 @@ function hasMoirixArtifacts(run: RunData | null): boolean {
   if (!run) return false;
   if (run.moirix_artifacts && Object.keys(run.moirix_artifacts).length > 0) return true;
   return (run.artifacts || []).some((artifact) => artifact.name.startsWith("moirix/") || artifact.path.includes("/artifacts/moirix/"));
+}
+
+function recordOf(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function LLMUsagePanel({ usage }: { usage: NonNullable<RunData["llm_usage"]> }) {
@@ -434,7 +448,7 @@ function LLMUsagePanel({ usage }: { usage: NonNullable<RunData["llm_usage"]> }) 
   );
 }
 
-function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "graph" | "authority" }) {
+function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "thesis" | "decision" | "position" | "authority" }) {
   const data = run.moirix_artifacts || {};
   const artifacts = (run.artifacts || []).filter((artifact) => artifact.name.startsWith("moirix/") || artifact.path.includes("/artifacts/moirix/"));
   if (Object.keys(data).length === 0 && artifacts.length === 0) {
@@ -444,13 +458,6 @@ function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "graph" | "
   if (kind === "evidence") {
     return (
       <div className="p-4 space-y-4">
-        {typeof data.moirix_summary_markdown === "string" && (
-          <RunCardPanel title="Summary" icon={FileCheck2}>
-            <div className="prose prose-sm max-w-none dark:prose-invert">
-              <ReactMarkdown rehypePlugins={rehypePlugins}>{data.moirix_summary_markdown}</ReactMarkdown>
-            </div>
-          </RunCardPanel>
-        )}
         <div className="grid gap-4 xl:grid-cols-2">
           <RunCardPanel title="Status" icon={Database}>
             <JsonBlock value={data.status} />
@@ -466,22 +473,115 @@ function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "graph" | "
     );
   }
 
-  if (kind === "graph") {
+  if (kind === "thesis") {
+    const thesis = recordOf(data.event_thesis_graph);
+    const current = recordOf(thesis?.current_thesis);
+    const window = recordOf(current?.execution_window);
     return (
       <div className="p-4 space-y-4">
-        <RunCardPanel title="Event Impact Graph" icon={BarChart3}>
-          <JsonBlock value={data.event_impact_graph} />
+        {typeof data.event_thesis_report_markdown === "string" && (
+          <RunCardPanel title="Event Thesis Report" icon={FileCheck2}>
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown rehypePlugins={rehypePlugins}>{data.event_thesis_report_markdown}</ReactMarkdown>
+            </div>
+          </RunCardPanel>
+        )}
+        <div className="grid gap-3 md:grid-cols-4">
+          <RunCardStat label="Stance" value={stringValue(current?.stance) || "not recorded"} />
+          <RunCardStat label="Actionability" value={stringValue(current?.actionability) || "not recorded"} />
+          <RunCardStat label="Window start" value={stringValue(window?.start) || "not recorded"} />
+          <RunCardStat label="Window end" value={stringValue(window?.end) || "not recorded"} />
+        </div>
+        <RunCardPanel title="Current Thesis" icon={FileCheck2}>
+          <KeyValueTable data={current || {}} empty="No current thesis recorded." />
         </RunCardPanel>
         <div className="grid gap-4 xl:grid-cols-2">
-          <RunCardPanel title="Event Signal Preview" icon={Database}>
-            <PreviewTable value={data.event_signal_preview} empty="No event signal preview recorded." />
+          <RunCardPanel title="Evidence Items" icon={Database}>
+            <PreviewTable value={thesis?.evidence_items} empty="No thesis evidence items recorded." />
           </RunCardPanel>
-          <RunCardPanel title="Forward Returns Preview" icon={BarChart3}>
-            <PreviewTable value={data.event_signal_forward_returns_preview} empty="No forward-return preview recorded." />
+          <RunCardPanel title="Semantic Relations" icon={BarChart3}>
+            <PreviewTable value={thesis?.relations} empty="No semantic relations recorded." />
           </RunCardPanel>
         </div>
-        <RunCardPanel title="Event Signal Study" icon={FileCheck2}>
-          <JsonBlock value={data.event_signal_backtest_summary} />
+        <RunCardPanel title="Raw Event Thesis" icon={Code2}>
+          <JsonBlock value={data.event_thesis_graph} />
+        </RunCardPanel>
+      </div>
+    );
+  }
+
+  if (kind === "decision") {
+    const context = recordOf(data.event_decision_context);
+    const counts = recordOf(context?.position_counts);
+    return (
+      <div className="p-4 space-y-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <RunCardStat label="Context status" value={stringValue(context?.status) || "not recorded"} />
+          <RunCardStat label="Positions" value={formatRunCardValue(counts?.positions ?? 0)} />
+          <RunCardStat label="Open orders" value={formatRunCardValue(counts?.open_orders ?? 0)} />
+          <RunCardStat label="Executions" value={formatRunCardValue(counts?.executions ?? 0)} />
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <RunCardPanel title="Account Summary" icon={Fingerprint}>
+            <KeyValueTable data={recordOf(context?.account_summary) || {}} empty="No account summary recorded." />
+          </RunCardPanel>
+          <RunCardPanel title="Portfolio Source" icon={Database}>
+            <KeyValueTable data={recordOf(context?.portfolio_source) || {}} empty="No portfolio source recorded." />
+          </RunCardPanel>
+        </div>
+        <RunCardPanel title="Positions" icon={List}>
+          <PreviewTable value={context?.positions} empty="No positions recorded." />
+        </RunCardPanel>
+        <RunCardPanel title="Raw Decision Context" icon={Code2}>
+          <JsonBlock value={data.event_decision_context} />
+        </RunCardPanel>
+      </div>
+    );
+  }
+
+  if (kind === "position") {
+    const position = recordOf(data.position_decision);
+    const proposal = recordOf(data.trade_proposal);
+    const risk = recordOf(data.risk_sizing_report);
+    const projectionManifest = recordOf(data.backtest_projection_manifest);
+    const execution = recordOf(data.execution_status);
+    const window = recordOf(position?.execution_window);
+    return (
+      <div className="p-4 space-y-4">
+        {typeof data.portfolio_adjustment_plan_markdown === "string" && (
+          <RunCardPanel title="Portfolio Adjustment Plan" icon={Gauge}>
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown rehypePlugins={rehypePlugins}>{data.portfolio_adjustment_plan_markdown}</ReactMarkdown>
+            </div>
+          </RunCardPanel>
+        )}
+        <div className="grid gap-3 md:grid-cols-4">
+          <RunCardStat label="Action" value={stringValue(position?.action) || "not recorded"} />
+          <RunCardStat label="Decision status" value={stringValue(position?.status) || "not recorded"} />
+          <RunCardStat label="Window start" value={stringValue(window?.start) || "not recorded"} />
+          <RunCardStat label="Execution status" value={stringValue(execution?.status) || "not recorded"} />
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <RunCardPanel title="Risk Sizing" icon={Gauge}>
+            <JsonBlock value={risk || position?.risk_sizing} />
+          </RunCardPanel>
+          <RunCardPanel title="Trade Proposal" icon={List}>
+            <PreviewTable value={proposal?.orders} empty="No proposed orders recorded." />
+          </RunCardPanel>
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <RunCardPanel title="Backtest Projection" icon={BarChart3}>
+            <PreviewTable value={data.decision_projection_preview} empty="No decision projection recorded." />
+          </RunCardPanel>
+          <RunCardPanel title="Projection Manifest" icon={FileCheck2}>
+            <JsonBlock value={projectionManifest} />
+          </RunCardPanel>
+        </div>
+        <RunCardPanel title="Raw Position Decision" icon={Code2}>
+          <JsonBlock value={data.position_decision} />
+        </RunCardPanel>
+        <RunCardPanel title="Execution Gate Status" icon={ShieldCheck}>
+          <JsonBlock value={data.execution_status} />
         </RunCardPanel>
       </div>
     );
@@ -499,9 +599,6 @@ function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "graph" | "
       </div>
       <RunCardPanel title="Authority Checks" icon={ShieldCheck}>
         <JsonBlock value={data.authority_checks} />
-      </RunCardPanel>
-      <RunCardPanel title="Moirix Artifact Manifest" icon={Database}>
-        <PreviewTable value={(data.artifact_names as string[] | undefined)?.map((name) => ({ artifact: name }))} empty="No Moirix artifact manifest recorded." />
       </RunCardPanel>
     </div>
   );

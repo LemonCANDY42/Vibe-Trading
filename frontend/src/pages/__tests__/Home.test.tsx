@@ -60,8 +60,31 @@ function makeMoirixDetail(overrides: Partial<RunData> = {}): RunData {
       status: { status: "ok" },
       coverage_status: { status: "partial", caveat: "Low-confidence evidence coverage." },
       news_evidence_preview: [{ id: "n1" }, { id: "n2" }],
-      event_impact_graph: { nodes: [] },
-      event_signal_backtest_summary: { total_events: 2 },
+      event_thesis_graph: {
+        current_thesis: {
+          stance: "bullish",
+          actionability: "watch",
+        },
+      },
+      event_decision_context: {
+        status: "ok",
+        position_counts: { positions: 1, open_orders: 0, executions: 0 },
+      },
+      position_decision: {
+        status: "ok",
+        action: "add",
+      },
+      trade_proposal: {
+        status: "proposed",
+        orders: [{ symbol: "NVDA", side: "buy", quantity: 1 }],
+        authority: {
+          broker_submit_allowed: false,
+          ready_for_real_money_trading_authority: false,
+        },
+      },
+      execution_status: {
+        status: "blocked",
+      },
       authority_status: {
         status: "checked",
         authority: { ready_for_real_money_trading_authority: false },
@@ -84,7 +107,7 @@ describe("Home workbench", () => {
     renderHome();
 
     expect(await screen.findByText("No runs yet")).toBeInTheDocument();
-    expect(screen.getByText("No Moirix run artifacts found in recent runs. Ordinary Vibe workflows are unaffected.")).toBeInTheDocument();
+    expect(screen.getByText("No Moirix event thesis or position decision artifacts found in recent runs. Ordinary Vibe workflows are unaffected.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Open Agent/i })).toHaveAttribute("href", "/agent");
     expect(apiMock.getRun).not.toHaveBeenCalled();
   });
@@ -122,17 +145,39 @@ describe("Home workbench", () => {
 
     renderHome();
 
-    expect(await screen.findByText("Moirix Research Evidence")).toBeInTheDocument();
+    expect(await screen.findByText("Moirix Event Thesis")).toBeInTheDocument();
     expect(screen.getAllByText("moirix_run")).toHaveLength(2);
     expect(screen.getByText("ordinary_run")).toBeInTheDocument();
     expect(screen.getByText("2 preview rows")).toBeInTheDocument();
-    expect(screen.getByText("graph artifact present")).toBeInTheDocument();
-    expect(screen.getByText("backtest summary present")).toBeInTheDocument();
+    expect(screen.getByText("bullish · watch")).toBeInTheDocument();
+    expect(screen.getByText("1 positions · 0 orders")).toBeInTheDocument();
+    expect(screen.getByText("add · 1 proposed")).toBeInTheDocument();
     expect(screen.getByText(/real-money=false/)).toBeInTheDocument();
     expect(screen.getByText("Low-confidence evidence coverage.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Evidence" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixEvidence");
-    expect(screen.getByRole("link", { name: "Graph" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixGraph");
+    expect(screen.getByRole("link", { name: "Thesis" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixThesis");
+    expect(screen.getByRole("link", { name: "Context" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixDecision");
+    expect(screen.getByRole("link", { name: "Position" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixPosition");
     expect(screen.getByRole("link", { name: "Authority" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixAuthority");
+  });
+
+  it("does not surface legacy graph-only Moirix runs as event thesis runs", async () => {
+    apiMock.listRuns.mockResolvedValue([
+      makeRun({ run_id: "legacy_moirix_run", prompt: "Legacy Moirix graph workflow" }),
+    ]);
+    apiMock.getRun.mockResolvedValue(makeRunDetail({
+      run_id: "legacy_moirix_run",
+      moirix_artifacts: {
+        status: { status: "ok" },
+        event_impact_graph: { nodes: [] },
+      },
+      artifacts: [{ name: "moirix/status.json", path: "/runs/moirix/artifacts/moirix/status.json", type: "json", size: 12, exists: true }],
+    }));
+
+    renderHome();
+
+    expect(await screen.findByText("legacy_moirix_run")).toBeInTheDocument();
+    expect(screen.getByText("No Moirix event thesis or position decision artifacts found in recent runs. Ordinary Vibe workflows are unaffected.")).toBeInTheDocument();
   });
 
   it("requests details only for the Moirix scan limit", async () => {

@@ -1,5 +1,9 @@
 # Review: Moirix Extension V0
 
+> Status: historical review. The active Moirix implementation has moved from
+> numeric event-impact graph / event_signal artifacts to the Agent-driven event
+> thesis workflow documented in `wiki/docs/moirix/MOIRIX_EXTENSION_PLAN.md`.
+
 ## Verdict
 
 Approved for local personal-fork use.

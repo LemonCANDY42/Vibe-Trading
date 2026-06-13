@@ -680,73 +680,129 @@ def moirix_query_news(
 
 
 @mcp.tool
-def moirix_build_event_graph(
+def moirix_portfolio_context(
     target: str,
+    market: str,
     as_of: str,
     run_dir: str,
-    input_path: str | None = None,
-    timeout_seconds: int = 120,
+    portfolio_snapshot_path: str | None = None,
+    ibkr_readiness_path: str | None = None,
 ) -> str:
-    """Build a Moirix candidate event-impact graph from run evidence.
+    """Write read-only portfolio context for a Moirix event thesis.
 
     Args:
-        target: Target symbol or instrument.
+        target: Target symbol, instrument, or issuer.
+        market: Market label such as US, HK, or CN.
         as_of: Point-in-time cutoff date/time.
         run_dir: Vibe run directory containing/writing artifacts/moirix.
-        input_path: Optional input evidence JSON/JSONL path.
-        timeout_seconds: Adapter subprocess timeout in seconds.
+        portfolio_snapshot_path: Optional read-only portfolio snapshot JSON path.
+        ibkr_readiness_path: Optional IBKR paper readiness JSON path.
     """
     payload: dict[str, Any] = {
         "target": target,
+        "market": market,
         "as_of": as_of,
         "run_dir": run_dir,
-        "timeout_seconds": timeout_seconds,
     }
-    if input_path:
-        payload["input_path"] = input_path
+    if portfolio_snapshot_path:
+        payload["portfolio_snapshot_path"] = portfolio_snapshot_path
+    if ibkr_readiness_path:
+        payload["ibkr_readiness_path"] = ibkr_readiness_path
     registry = _get_registry()
-    return registry.execute("moirix_build_event_graph", payload)
+    return registry.execute("moirix_portfolio_context", payload)
 
 
 @mcp.tool
-def moirix_export_event_signal(run_dir: str, timeout_seconds: int = 120) -> str:
-    """Export Moirix event_signal.csv as a Vibe run artifact.
-
-    Args:
-        run_dir: Vibe run directory containing/writing artifacts/moirix.
-        timeout_seconds: Adapter subprocess timeout in seconds.
-    """
-    registry = _get_registry()
-    return registry.execute(
-        "moirix_export_event_signal",
-        {"run_dir": run_dir, "timeout_seconds": timeout_seconds},
-    )
-
-
-@mcp.tool
-def moirix_event_signal_backtest(
+def moirix_write_event_thesis(
+    thesis_json: str,
     run_dir: str,
-    event_signal_path: str | None = None,
-    price_csv_path: str | None = None,
-    horizons: list[int] | None = None,
+    report_markdown: str | None = None,
 ) -> str:
-    """Run an explicit-price forward-return study for Moirix event signals.
+    """Validate and write canonical Moirix event thesis artifacts.
 
     Args:
-        run_dir: Vibe run directory containing/writing artifacts/moirix.
-        event_signal_path: Optional event_signal.csv path.
-        price_csv_path: Optional daily close CSV path.
-        horizons: Forward-return horizons in trading rows.
+        thesis_json: JSON string using schema vibe.moirix_event_thesis.v1.
+        run_dir: Vibe run directory containing artifacts/moirix/news_evidence.jsonl.
+        report_markdown: Optional human-readable thesis report.
     """
-    payload: dict[str, Any] = {"run_dir": run_dir}
-    if event_signal_path:
-        payload["event_signal_path"] = event_signal_path
-    if price_csv_path:
-        payload["price_csv_path"] = price_csv_path
-    if horizons:
-        payload["horizons"] = horizons
+    payload: dict[str, Any] = {"thesis_json": thesis_json, "run_dir": run_dir}
+    if report_markdown:
+        payload["report_markdown"] = report_markdown
     registry = _get_registry()
-    return registry.execute("moirix_event_signal_backtest", payload)
+    return registry.execute("moirix_write_event_thesis", payload)
+
+
+@mcp.tool
+def moirix_write_position_decision(
+    decision_json: str,
+    run_dir: str,
+    adjustment_plan_markdown: str | None = None,
+) -> str:
+    """Validate and write canonical Moirix position decision artifacts.
+
+    Args:
+        decision_json: JSON string using schema vibe.moirix_position_decision.v1.
+        run_dir: Vibe run directory containing Moirix thesis/context artifacts.
+        adjustment_plan_markdown: Optional human-readable adjustment plan.
+    """
+    payload: dict[str, Any] = {"decision_json": decision_json, "run_dir": run_dir}
+    if adjustment_plan_markdown:
+        payload["adjustment_plan_markdown"] = adjustment_plan_markdown
+    registry = _get_registry()
+    return registry.execute("moirix_write_position_decision", payload)
+
+
+@mcp.tool
+def moirix_export_decision_projection(
+    run_dir: str,
+    decision_path: str | None = None,
+    projection_mode: str = "window",
+) -> str:
+    """Export a Moirix position decision into backtest projection artifacts.
+
+    Args:
+        run_dir: Vibe run directory containing artifacts/moirix/position_decision.json.
+        decision_path: Optional position decision JSON path.
+        projection_mode: single_day or window.
+    """
+    payload: dict[str, Any] = {"run_dir": run_dir, "projection_mode": projection_mode}
+    if decision_path:
+        payload["decision_path"] = decision_path
+    registry = _get_registry()
+    return registry.execute("moirix_export_decision_projection", payload)
+
+
+@mcp.tool
+def moirix_execute_trade_proposal(
+    approval_path: str,
+    run_dir: str,
+    execution_mode: str = "paper",
+    proposal_path: str | None = None,
+    connection: str | None = None,
+    dry_run: bool = True,
+) -> str:
+    """Run the fail-closed Moirix trade proposal execution gate.
+
+    Args:
+        approval_path: Explicit execution approval JSON path.
+        run_dir: Vibe run directory containing artifacts/moirix/trade_proposal.json.
+        execution_mode: paper or live. v1 blocks live.
+        proposal_path: Optional proposal JSON path.
+        connection: Optional trading connector profile id.
+        dry_run: Validate only when true.
+    """
+    payload: dict[str, Any] = {
+        "approval_path": approval_path,
+        "run_dir": run_dir,
+        "execution_mode": execution_mode,
+        "dry_run": dry_run,
+    }
+    if proposal_path:
+        payload["proposal_path"] = proposal_path
+    if connection:
+        payload["connection"] = connection
+    registry = _get_registry()
+    return registry.execute("moirix_execute_trade_proposal", payload)
 
 
 @mcp.tool

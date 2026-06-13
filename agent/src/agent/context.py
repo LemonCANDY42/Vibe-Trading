@@ -37,7 +37,7 @@ Decide which workflow to use based on the request:
 
 **Backtest** — user wants to create, test, or optimize a trading strategy:
 If the request asks for news, events, PIT evidence, source-lake evidence,
-Moirix, or event-impact validation, use the **Moirix event graph** workflow
+Moirix, or event-impact validation, use the **Moirix event thesis** workflow
 instead of a plain technical-signal backtest.
 1. `load_skill("strategy-generate")` — read the SignalEngine contract
 2. `write_file("config.json", ...)` — source, codes, dates, parameters
@@ -54,21 +54,26 @@ instead of a plain technical-signal backtest.
 **Analysis / research** — user wants factor analysis, options pricing, market data, or general research:
 - Load the relevant skill first, then use the matching tool (factor_analysis, options_pricing, bash for custom scripts).
 
-**Moirix event graph** — user wants PIT news evidence, event-impact graph paths, source coverage, or authority-boundary review:
+**Moirix event thesis / position decision** — user wants PIT news evidence, event analysis, source coverage, portfolio-aware event reasoning, position adjustment proposals, or authority-boundary review:
 1. `load_skill("moirix-event-graph")` — read the Moirix/Vibe boundary and labels
 2. `moirix_status()` — check adapter availability and fail-closed authority state
 3. `moirix_query_news(target=..., market=..., as_of=..., lookback_days=...)`
-4. If evidence exists, `moirix_build_event_graph(target=..., as_of=...)`
-5. If event-signal features are needed, `moirix_export_event_signal()` to expose `event_signal.csv`
-6. If the user asks for a news-aware backtest, event-signal backtest,
-   forward-return study, or event-study validation, call
-   `moirix_event_signal_backtest(price_csv_path=...)` with explicit price CSV;
-   do not route news through market-data loaders.
-7. If a proposal or authority boundary is involved, `moirix_authority_guard(proposal_path=...)`;
-   its outputs are isolated under `artifacts/moirix/authority_checks/` and must
-   not be treated as the main graph/signal status.
-8. If Moirix is blocked/unavailable, preserve that status. Any web_search/read_url fallback must be labeled ad-hoc web research, not PIT source-lake evidence.
-9. Never turn graph scores into broker orders or real-account trading advice.
+4. If portfolio context is relevant, call `moirix_portfolio_context(target=..., market=..., as_of=...)`.
+5. Synthesize an Agent-driven event thesis from PIT evidence and portfolio context, then call
+   `moirix_write_event_thesis(thesis_json=..., report_markdown=...)`.
+6. If the user asks what to do with a current position or new target, synthesize a research-only position decision and call
+   `moirix_write_position_decision(decision_json=..., adjustment_plan_markdown=...)`.
+7. If the user asks for historical evaluation or backtesting of the decision, call
+   `moirix_export_decision_projection(projection_mode="window")`.
+   Treat projection artifacts as research-only backtest inputs, not Moirix evidence or broker orders.
+8. If the user explicitly provides an execution approval artifact for paper trading, call
+   `moirix_execute_trade_proposal(approval_path=..., execution_mode="paper", connection=..., dry_run=...)`.
+   Live execution is blocked in Moirix v1. Without explicit approval, preserve blocked status and do not call broker tools.
+9. If a proposal or authority boundary is involved, `moirix_authority_guard(proposal_path=...)`;
+   its outputs are isolated under `artifacts/moirix/authority_checks/`.
+10. If Moirix is blocked/unavailable, preserve that status. Any web_search/read_url fallback must be labeled ad-hoc web research, not PIT source-lake evidence.
+11. Do not build numeric event-impact graphs, event_signal CSVs, or forward-return studies from news in this workflow. The canonical outputs are `event_thesis_graph.json`, `position_decision.json`, and optional `decision_projection.csv`.
+12. Never turn event thesis output into broker orders or real-account trading advice. Orders can only flow through `moirix_execute_trade_proposal` plus the existing Vibe trading connector gates.
 
 **IBKR paper readiness** — user asks whether the logged-in local IB Gateway/TWS paper account is ready:
 - Call `ibkr_paper_readiness(run_dir=...)`; it writes `artifacts/ibkr/ibkr_paper_readiness.json`.

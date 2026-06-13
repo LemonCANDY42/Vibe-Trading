@@ -19,7 +19,7 @@ class MoirixAuthorityGuardTool(BaseTool):
         "orders, custody actions, live trading, or real-money authority must be "
         "blocked. Authority-check artifacts are isolated under "
         "artifacts/moirix/authority_checks so blocked checks do not overwrite the "
-        "run's main Moirix graph/signal artifacts. This tool never submits, "
+        "run's main Moirix thesis/decision artifacts. This tool never submits, "
         "cancels, or modifies orders."
     )
     parameters = {

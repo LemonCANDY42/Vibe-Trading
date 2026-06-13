@@ -58,8 +58,8 @@ def adapter_authority_artifact_dir(run_dir: str, proposal_path: Path) -> Path:
 
     Moirix adapter commands write common files such as ``status.json`` and
     ``coverage_status.json``. Authority checks are intentionally isolated from
-    the main graph/signal artifact directory so a blocked proposal cannot
-    overwrite the run's primary Moirix graph status.
+    the main thesis/decision artifact directory so a blocked proposal cannot
+    overwrite the run's primary Moirix thesis or decision status.
     """
     root = adapter_artifact_dir(run_dir)
     stem = _safe_artifact_segment(proposal_path.stem) or "proposal"
