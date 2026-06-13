@@ -16,12 +16,23 @@ import { formatMetricVal } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
 const REPORT_SCAN_LIMIT = 100;
+type ReportSortKey = "created_desc" | "created_asc" | "return_desc" | "sharpe_desc" | "status_asc" | "run_id_desc";
+
+const REPORT_SORT_OPTIONS: { value: ReportSortKey; label: string }[] = [
+  { value: "created_desc", label: "Newest first" },
+  { value: "created_asc", label: "Oldest first" },
+  { value: "return_desc", label: "Best return" },
+  { value: "sharpe_desc", label: "Best Sharpe" },
+  { value: "status_asc", label: "Status A-Z" },
+  { value: "run_id_desc", label: "Run ID Z-A" },
+];
 
 export function Reports() {
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<ReportSortKey>("created_desc");
   const [error, setError] = useState<string | null>(null);
 
   async function loadReports(mode: "initial" | "refresh" = "refresh") {
@@ -46,8 +57,7 @@ export function Reports() {
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return runs;
-    return runs.filter((run) => {
+    const filteredRuns = needle ? runs.filter((run) => {
       const haystack = [
         run.run_id,
         run.status,
@@ -57,8 +67,9 @@ export function Reports() {
         run.end_date,
       ].filter(Boolean).join(" ").toLowerCase();
       return haystack.includes(needle);
-    });
-  }, [runs, query]);
+    }) : runs;
+    return [...filteredRuns].sort((a, b) => compareReports(a, b, sortKey));
+  }, [runs, query, sortKey]);
 
   return (
     <div className="min-h-screen p-6 lg:p-8">
@@ -87,7 +98,7 @@ export function Reports() {
           </button>
         </section>
 
-        <section className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <section className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <label className="relative block md:w-96">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -97,8 +108,23 @@ export function Reports() {
               className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm outline-none transition focus:border-primary"
             />
           </label>
-          <div className="text-sm text-muted-foreground">
-            {filtered.length} of {runs.length} reports
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-muted-foreground">Sort</span>
+              <select
+                value={sortKey}
+                onChange={(event) => setSortKey(event.target.value as ReportSortKey)}
+                className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none transition focus:border-primary"
+                aria-label="Sort reports"
+              >
+                {REPORT_SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <div className="text-sm text-muted-foreground">
+              {filtered.length} of {runs.length} reports
+            </div>
           </div>
         </section>
 
@@ -224,6 +250,48 @@ function MetricPill({ label, value }: { label: string; value: string }) {
 
 function formatOptionalMetric(key: string, value: number | undefined): string {
   return Number.isFinite(value) ? formatMetricVal(key, value as number) : "-";
+}
+
+function compareReports(a: RunListItem, b: RunListItem, sortKey: ReportSortKey): number {
+  switch (sortKey) {
+    case "created_asc":
+      return compareNumbers(parseReportTime(a), parseReportTime(b), "asc") || compareStrings(a.run_id, b.run_id, "asc");
+    case "return_desc":
+      return compareNumbers(metricValue(a.total_return), metricValue(b.total_return), "desc") || compareReports(a, b, "created_desc");
+    case "sharpe_desc":
+      return compareNumbers(metricValue(a.sharpe), metricValue(b.sharpe), "desc") || compareReports(a, b, "created_desc");
+    case "status_asc":
+      return compareStrings(a.status, b.status, "asc") || compareReports(a, b, "created_desc");
+    case "run_id_desc":
+      return compareStrings(a.run_id, b.run_id, "desc");
+    case "created_desc":
+    default:
+      return compareNumbers(parseReportTime(a), parseReportTime(b), "desc") || compareStrings(a.run_id, b.run_id, "desc");
+  }
+}
+
+function parseReportTime(run: RunListItem): number {
+  const created = run.created_at || "";
+  const normalized = created.includes("T") ? created : created.replace(" ", "T");
+  const parsed = Date.parse(normalized);
+  if (Number.isFinite(parsed)) return parsed;
+  const match = run.run_id.match(/^(\d{8})_(\d{6})/);
+  if (!match) return 0;
+  const [, date, time] = match;
+  return Date.parse(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${time.slice(0, 2)}:${time.slice(2, 4)}:${time.slice(4, 6)}`) || 0;
+}
+
+function metricValue(value: number | undefined): number {
+  return Number.isFinite(value) ? value as number : Number.NEGATIVE_INFINITY;
+}
+
+function compareNumbers(a: number, b: number, direction: "asc" | "desc"): number {
+  return direction === "asc" ? a - b : b - a;
+}
+
+function compareStrings(a: string | undefined, b: string | undefined, direction: "asc" | "desc"): number {
+  const result = String(a || "").localeCompare(String(b || ""));
+  return direction === "asc" ? result : -result;
 }
 
 function formatRunDate(value: string): string {

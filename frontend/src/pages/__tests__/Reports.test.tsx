@@ -67,4 +67,41 @@ describe("Reports page", () => {
     expect(screen.queryByText("run-aapl")).not.toBeInTheDocument();
     expect(screen.getByText("run-nvda")).toBeInTheDocument();
   });
+
+  it("sorts reports newest first by default", async () => {
+    apiMock.listRuns.mockResolvedValue([
+      makeRun({ run_id: "older", created_at: "2026-06-10T08:00:00Z" }),
+      makeRun({ run_id: "newer", created_at: "2026-06-12T08:00:00Z" }),
+      makeRun({ run_id: "middle", created_at: "2026-06-11 08:00:00" }),
+    ]);
+
+    renderReports();
+    expect(await screen.findByText("newer")).toBeInTheDocument();
+
+    const rows = Array.from(document.querySelectorAll("article")).map((row) => row.textContent || "");
+    expect(rows[0]).toContain("newer");
+    expect(rows[1]).toContain("middle");
+    expect(rows[2]).toContain("older");
+  });
+
+  it("can sort reports by best return", async () => {
+    apiMock.listRuns.mockResolvedValue([
+      makeRun({ run_id: "low-return", created_at: "2026-06-12T08:00:00Z", total_return: 0.01 }),
+      makeRun({ run_id: "high-return", created_at: "2026-06-10T08:00:00Z", total_return: 0.42 }),
+    ]);
+
+    renderReports();
+    expect(await screen.findByText("high-return")).toBeInTheDocument();
+
+    let rows = Array.from(document.querySelectorAll("article")).map((row) => row.textContent || "");
+    expect(rows[0]).toContain("low-return");
+
+    fireEvent.change(screen.getByLabelText("Sort reports"), {
+      target: { value: "return_desc" },
+    });
+
+    rows = Array.from(document.querySelectorAll("article")).map((row) => row.textContent || "");
+    expect(rows[0]).toContain("high-return");
+    expect(rows[1]).toContain("low-return");
+  });
 });
