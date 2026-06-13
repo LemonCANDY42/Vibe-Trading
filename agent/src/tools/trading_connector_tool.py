@@ -54,7 +54,7 @@ def _num_or_none(value: Any) -> float | None:
 TRADING_COMMON_PARAMETERS = {
     "connection": {
         "type": "string",
-        "description": "Trading connector profile id, e.g. ibkr-paper-local or robinhood-live-mcp. Defaults to the selected profile.",
+        "description": "Trading connector profile id, e.g. ibkr-paper-local, ibkr-paper-trade, or robinhood-live-mcp. Defaults to the selected profile.",
     },
     "host": {
         "type": "string",
@@ -120,7 +120,7 @@ class TradingSelectConnectionTool(BaseTool):
         "properties": {
             "connection": {
                 "type": "string",
-                "description": "Profile id to select, e.g. ibkr-paper-local.",
+                "description": "Profile id to select, e.g. ibkr-paper-local or ibkr-paper-trade.",
             }
         },
         "required": ["connection"],
@@ -321,7 +321,8 @@ class TradingPlaceOrderTool(BaseTool):
         "Place an order through the selected trading connector profile. Paper "
         "profiles trade a sandbox account; live profiles are gated by the user's "
         "mandate and kill switch. side is 'buy' or 'sell'; give exactly one of "
-        "quantity (units) or notional (account-currency amount)."
+        "quantity (units) or notional (account-currency amount). IBKR paper "
+        "orders currently require quantity."
     )
     parameters = {
         "type": "object",

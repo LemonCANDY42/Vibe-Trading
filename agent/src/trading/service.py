@@ -249,13 +249,32 @@ def place_order(
 ) -> dict[str, Any]:
     """Place an order via a connector profile.
 
-    Paper profiles place directly against the broker's sandbox account. Live
+    Paper profiles place directly against the broker's sandbox account. IBKR
+    paper may also place through a local TWS / IB Gateway profile. Live
     profiles route through the direct-SDK mandate gate (mandate + kill switch +
     fail-closed pre-trade checks + audit) before any order reaches the broker.
-    Only ``broker_sdk`` connectors are supported here; Robinhood keeps its MCP
-    gate and IBKR stays read-only.
+    Robinhood keeps its MCP gate and live IBKR stays read-only.
     """
     profile = profile_by_id(profile_id)
+    if profile.connector == "ibkr" and profile.transport == "local_tws":
+        if profile.environment != "paper" or "orders.place" not in profile.capabilities:
+            return _unsupported(profile, "orders.place")
+        from src.trading.connectors.ibkr.local import place_order as _ibkr_place_order
+
+        return _with_profile(
+            profile,
+            _ibkr_place_order(
+                _ibkr_config(profile, overrides),
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                notional=notional,
+                order_type=order_type,
+                limit_price=limit_price,
+                time_in_force=time_in_force,
+            ),
+        )
+
     if profile.transport != "broker_sdk":
         return _unsupported(profile, "orders.place")
 
@@ -314,6 +333,18 @@ def cancel_order(
     action must be logged (Red Lines).
     """
     profile = profile_by_id(profile_id)
+    if profile.connector == "ibkr" and profile.transport == "local_tws":
+        if profile.environment != "paper" or "orders.cancel" not in profile.capabilities:
+            return _unsupported(profile, "orders.cancel")
+        from src.trading.connectors.ibkr.local import cancel_order as _ibkr_cancel_order
+
+        result = _ibkr_cancel_order(
+            _ibkr_config(profile, overrides),
+            order_id,
+            symbol=symbol,
+        )
+        return _with_profile(profile, result)
+
     if profile.transport != "broker_sdk":
         return _unsupported(profile, "orders.cancel")
     module = _sdk_module(profile.connector)
@@ -426,6 +457,7 @@ def _ibkr_config(profile: TradingProfile, overrides: dict[str, Any]):
         port=_int_or_none(overrides.get("port")),
         client_id=_int_or_none(overrides.get("client_id")),
         account=_clean(overrides.get("account")),
+        readonly=profile.readonly,
     )
 
 

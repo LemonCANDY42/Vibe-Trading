@@ -62,6 +62,19 @@ def test_ibkr_official_profile_does_not_advertise_unknown_generic_reads() -> Non
     assert "does not support" in result["error"]
 
 
+def test_ibkr_paper_trade_profile_exposes_paper_orders_only() -> None:
+    profile = profiles.profile_by_id("ibkr-paper-trade")
+    live = profiles.profile_by_id("ibkr-live-local-readonly")
+
+    assert profile.connector == "ibkr"
+    assert profile.environment == "paper"
+    assert profile.transport == "local_tws"
+    assert profile.readonly is False
+    assert "orders.place" in profile.capabilities
+    assert live.readonly is True
+    assert "orders.place" not in live.capabilities
+
+
 def test_connector_profile_id_for_broker_prefers_live_remote_mcp() -> None:
     """Broker on-ramps should resolve through the centralized profile registry."""
     assert service.connector_profile_id_for_broker("robinhood") == "robinhood-live-mcp"
@@ -160,7 +173,8 @@ def test_ibkr_paper_readiness_writes_readonly_artifact(
 
     assert payload["status"] == "ok"
     assert payload["endpoint"]["port"] == 4002
-    assert payload["endpoint"]["auto_selected_gateway_paper_port"] is True
+    assert payload["endpoint"]["profile_default_port"] == 4002
+    assert payload["endpoint"]["auto_selected_gateway_paper_port"] is False
     assert payload["read_only_contract"]["no_order_api_calls"] is True
     assert payload["authority"]["ready_for_real_money_trading_authority"] is False
     assert payload["claim_gate"]["ready_for_real_money_trading_authority"] is False

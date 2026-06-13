@@ -64,6 +64,12 @@ write its own run-local research proposal artifacts and, only through a separate
 execution gate, may forward an explicitly approved paper-trading proposal to an
 existing Vibe trading connector.
 
+For IBKR, the connector split is explicit: `ibkr-paper-local` remains the
+read-only readiness/profile for account and market-data checks, while
+`ibkr-paper-trade` is the paper-only order profile. IBKR live profiles remain
+read-only. Moirix tools may request the execution gate, but they do not own the
+IBKR connector or bypass Vibe's approval checks.
+
 ## Canonical Artifacts
 
 ```text

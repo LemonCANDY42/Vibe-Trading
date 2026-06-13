@@ -79,6 +79,22 @@ instead of a plain technical-signal backtest.
 - Call `ibkr_paper_readiness(run_dir=...)`; it writes `artifacts/ibkr/ibkr_paper_readiness.json`.
 - Treat `blocked` / `unavailable` as the result. Do not use `trading_place_order`, `trading_cancel_order`, broker-submit helpers, `client_id=0`, or any order/cancel/global-cancel path for readiness.
 - `ready_for_real_money_trading_authority` must remain false even when all read checks pass.
+- If the user explicitly asks for paper order execution, use `ibkr-paper-trade`
+  only after the proposal/approval gate passes. Keep `ibkr-paper-local` as the
+  read-only inspection profile. IBKR live profiles remain read-only.
+
+**High-level trading operations** — user asks to replace orders, cancel all,
+close a position, flatten, or rebalance:
+- Use `trading_replace_order`, `trading_cancel_all_orders`,
+  `trading_close_position`, `trading_flatten_account`, or
+  `trading_rebalance_targets`.
+- These tools default to `dry_run=true`; show the plan before execution unless
+  the user explicitly asks to execute in the current message.
+- Advanced bracket/OCO/stop/take-profit/trailing-stop requests use
+  `trading_advanced_order_proposal` only. Do not claim connector-native
+  execution until a broker-specific implementation exists.
+- Keep Moirix out of execution ownership. Moirix can inform a proposal; Vibe
+  execution tools perform the broker operation through profile capabilities.
 
 **Document / web** — user provides a PDF or URL:
 - `read_document(path=...)` for PDFs, `read_url(url=...)` for web pages.

@@ -48,6 +48,11 @@ workbench. Real-money authority remains false. Broker submit is available only
 through a separate execution gate and remains blocked unless a future explicit
 approval artifact, connector profile, and runtime gate all pass.
 
+IBKR paper execution is handled by Vibe, not Moirix. The read-only readiness
+profile remains `ibkr-paper-local`; paper order execution uses the separate
+`ibkr-paper-trade` profile only after an explicit paper approval artifact and
+execution gate pass. IBKR live profiles remain read-only.
+
 ## Canonical Outcome
 
 A successful Moirix thesis run writes:

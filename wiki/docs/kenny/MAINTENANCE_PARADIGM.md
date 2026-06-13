@@ -24,6 +24,36 @@ Broker submit stays behind a separate explicit execution gate.
 Real-money authority stays fail-closed.
 ```
 
+IBKR profile split:
+
+- `ibkr-paper-local`: read-only paper readiness, account, positions, orders,
+  quotes, and history;
+- `ibkr-paper-trade`: non-readonly paper order profile, usable only after Vibe's
+  explicit proposal/approval/execution gates pass;
+- IBKR live profiles remain read-only in this fork.
+
+## Trader Operation Surface
+
+The project should expose a complete trading-operator surface incrementally,
+but every mutating operation must remain capability-gated:
+
+- already canonical: account, positions, open orders, executions where
+  available, quotes, historical bars, place order, cancel order, replace order
+  through cancel+place, cancel all orders, close position, flatten account, and
+  quantity-target rebalance;
+- place order requires a paper profile or a live mandate-gated profile;
+- cancel order is risk-reducing but still audited for live profiles;
+- unsupported broker behavior must return blocked/error rather than being
+  simulated as real execution;
+- autonomous Agent operation is allowed only inside explicit environment,
+  mandate, kill-switch, approval, and connector capability boundaries.
+
+High-level actions are Vibe execution-layer tools that decompose into the
+broker's supported primitive capabilities. They must not be implemented inside
+Moirix evidence or thesis tools. Bracket/OCO, stop-loss/take-profit,
+trailing-stop, and execution schedules remain proposal-only until connector-
+native support is implemented and tested broker by broker.
+
 ## Source Documents
 
 Read these before changing the Moirix/Vibe integration path:

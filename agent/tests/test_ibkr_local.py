@@ -37,6 +37,35 @@ class _FakeStock(_FakeContract):
         self.localSymbol = symbol
 
 
+class _FakeOrder:
+    def __init__(self) -> None:
+        self.action = ""
+        self.totalQuantity = 0
+        self.orderType = ""
+        self.lmtPrice = None
+        self.tif = ""
+        self.account = ""
+
+
+class _FakeMarketOrder(_FakeOrder):
+    def __init__(self, action: str, quantity: float, *, tif: str = "DAY") -> None:
+        super().__init__()
+        self.action = action
+        self.totalQuantity = quantity
+        self.orderType = "MKT"
+        self.tif = tif
+
+
+class _FakeLimitOrder(_FakeOrder):
+    def __init__(self, action: str, quantity: float, limit_price: float, *, tif: str = "DAY") -> None:
+        super().__init__()
+        self.action = action
+        self.totalQuantity = quantity
+        self.orderType = "LMT"
+        self.lmtPrice = limit_price
+        self.tif = tif
+
+
 class _FakeIB:
     def connect(self, host, port, *, clientId, timeout, readonly=True, account=""):
         self.host = host
@@ -68,7 +97,16 @@ class _FakeIB:
         return [SimpleNamespace(account="DU12345", contract=contract, position=3, avgCost=150.0)]
 
     def openTrades(self):
-        return []
+        contract = SimpleNamespace(symbol="AAPL", localSymbol="AAPL", secType="STK", exchange="SMART", currency="USD")
+        order = _FakeLimitOrder("BUY", 1, 100.5, tif="DAY")
+        order.orderId = 123
+        return [
+            SimpleNamespace(
+                contract=contract,
+                order=order,
+                orderStatus=SimpleNamespace(status="Submitted", filled=0, remaining=1, avgFillPrice=0),
+            )
+        ]
 
     def qualifyContracts(self, contract):
         return [contract]
@@ -95,6 +133,18 @@ class _FakeIB:
     ):
         return [SimpleNamespace(date="2026-05-29", open=1, high=2, low=0.5, close=1.5, volume=100)]
 
+    def placeOrder(self, contract, order):
+        self.placed = {"contract": contract, "order": order}
+        return SimpleNamespace(
+            contract=contract,
+            order=order,
+            orderStatus=SimpleNamespace(status="Submitted", filled=0, remaining=order.totalQuantity, avgFillPrice=0),
+        )
+
+    def cancelOrder(self, order):
+        self.cancelled = order
+        return order
+
 
 @pytest.fixture()
 def fake_ib_async(monkeypatch: pytest.MonkeyPatch):
@@ -102,6 +152,9 @@ def fake_ib_async(monkeypatch: pytest.MonkeyPatch):
     module.IB = _FakeIB
     module.Stock = _FakeStock
     module.Contract = _FakeContract
+    module.Order = _FakeOrder
+    module.MarketOrder = _FakeMarketOrder
+    module.LimitOrder = _FakeLimitOrder
     monkeypatch.setitem(sys.modules, "ib_async", module)
     monkeypatch.setattr(local, "tcp_port_open", lambda *_, **__: True)
     return module
@@ -136,6 +189,80 @@ def test_quote_and_history_are_readonly(fake_ib_async) -> None:
 
     assert quote["quote"]["last"] == 100.1
     assert history["bars"][0]["close"] == 1.5
+
+
+def test_place_order_requires_non_readonly_paper_config(fake_ib_async) -> None:
+    readonly = local.place_order(
+        local.IBKRLocalConfig(profile="paper", readonly=True),
+        symbol="AAPL",
+        side="buy",
+        quantity=1,
+    )
+    live = local.place_order(
+        local.IBKRLocalConfig(profile="live-readonly", readonly=False),
+        symbol="AAPL",
+        side="buy",
+        quantity=1,
+    )
+
+    assert readonly["status"] == "error"
+    assert "non-readonly paper" in readonly["error"]
+    assert live["status"] == "error"
+    assert "paper" in live["error"].lower()
+
+
+def test_place_order_submits_quantity_order(fake_ib_async) -> None:
+    result = local.place_order(
+        local.IBKRLocalConfig(profile="paper", readonly=False, account="DU12345"),
+        symbol="AAPL",
+        side="buy",
+        quantity=1,
+        order_type="limit",
+        limit_price=100.5,
+        time_in_force="gtc",
+    )
+
+    assert result["status"] == "ok"
+    assert result["paper"] is True
+    assert result["order"]["action"] == "BUY"
+    assert result["order"]["order_type"] == "LMT"
+    assert result["order"]["limit_price"] == 100.5
+    assert result["order"]["tif"] == "GTC"
+    assert result["trade"]["status"]["status"] == "Submitted"
+
+
+def test_place_order_rejects_notional_only(fake_ib_async) -> None:
+    result = local.place_order(
+        local.IBKRLocalConfig(profile="paper", readonly=False),
+        symbol="AAPL",
+        side="buy",
+        notional=100,
+    )
+
+    assert result["status"] == "error"
+    assert "quantity" in result["error"]
+
+
+def test_cancel_order_requires_non_readonly_paper_config(fake_ib_async) -> None:
+    readonly = local.cancel_order(local.IBKRLocalConfig(profile="paper", readonly=True), "123")
+    live = local.cancel_order(local.IBKRLocalConfig(profile="live-readonly", readonly=False), "123")
+
+    assert readonly["status"] == "error"
+    assert "non-readonly paper" in readonly["error"]
+    assert live["status"] == "error"
+    assert "paper" in live["error"].lower()
+
+
+def test_cancel_order_cancels_open_order(fake_ib_async) -> None:
+    result = local.cancel_order(
+        local.IBKRLocalConfig(profile="paper", readonly=False, account="DU12345"),
+        "123",
+        symbol="AAPL",
+    )
+
+    assert result["status"] == "ok"
+    assert result["order_id"] == 123
+    assert result["cancel_result"]["order_id"] == 123
 
 
 def test_paper_profile_rejects_live_account(monkeypatch: pytest.MonkeyPatch, fake_ib_async) -> None:

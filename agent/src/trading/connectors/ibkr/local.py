@@ -1,8 +1,9 @@
-"""Local read-only Interactive Brokers connector via TWS / IB Gateway.
+"""Local Interactive Brokers connector via TWS / IB Gateway.
 
 This module intentionally connects only to a user-owned local TWS or IB Gateway
-session. It does not handle IBKR credentials, does not talk to cloud broker
-endpoints directly, and exposes no order-placement method.
+session. It does not handle IBKR credentials and does not talk to cloud broker
+endpoints directly. Order placement is limited to explicit non-readonly paper
+profiles and remains blocked for live/read-only profiles.
 """
 
 from __future__ import annotations
@@ -54,7 +55,8 @@ class IBKRLocalConfig:
         profile: ``paper`` or ``live-readonly``.
         account: Optional account code to filter requests.
         timeout: Connection timeout in seconds.
-        readonly: Always passed as true when the SDK supports it.
+        readonly: Passed to the SDK when supported. Read profiles force true;
+            the paper trade profile force false through the trading service.
     """
 
     host: str = "127.0.0.1"
@@ -98,6 +100,7 @@ class IBKRLocalConfig:
         client_id: int | None = None,
         profile: str | None = None,
         account: str | None = None,
+        readonly: bool | None = None,
     ) -> "IBKRLocalConfig":
         """Return a copy with CLI/tool overrides applied."""
         payload = asdict(self)
@@ -113,6 +116,8 @@ class IBKRLocalConfig:
             payload["client_id"] = client_id
         if account is not None:
             payload["account"] = account
+        if readonly is not None:
+            payload["readonly"] = readonly
         return IBKRLocalConfig.from_mapping(payload)
 
 
@@ -385,6 +390,112 @@ def get_historical_bars(
         _disconnect(ib)
 
 
+def place_order(
+    config: IBKRLocalConfig,
+    *,
+    symbol: str,
+    side: str,
+    quantity: float | None = None,
+    notional: float | None = None,
+    order_type: str = "market",
+    limit_price: float | None = None,
+    time_in_force: str = "day",
+    exchange: str = "SMART",
+    currency: str = "USD",
+    sec_type: str = "STK",
+) -> dict[str, Any]:
+    """Place a paper order through local TWS / IB Gateway.
+
+    This function is intentionally narrow: it refuses read-only configs, live
+    profiles, notional-only orders, unsupported order types, and non-paper
+    accounts. It never handles credentials or connects to IBKR cloud APIs.
+    """
+    validation = _validate_place_order(
+        config,
+        side=side,
+        quantity=quantity,
+        notional=notional,
+        order_type=order_type,
+        limit_price=limit_price,
+        time_in_force=time_in_force,
+    )
+    if validation is not None:
+        return validation
+
+    ib = _connect(config)
+    try:
+        accounts = _managed_accounts(ib)
+        _assert_profile(config, accounts)
+        contract = _make_contract(symbol, exchange=exchange, currency=currency, sec_type=sec_type)
+        _qualify_contract(ib, contract)
+        order = _make_order(
+            side=side,
+            quantity=float(quantity or 0),
+            order_type=order_type,
+            limit_price=limit_price,
+            time_in_force=time_in_force,
+            account=config.account,
+        )
+        trade = ib.placeOrder(contract, order)
+        _sleep(ib, 1.0)
+        return {
+            "status": "ok",
+            "symbol": symbol.strip().upper(),
+            "profile": config.profile,
+            "paper": True,
+            "order": _order_to_dict(_obj_get(trade, "order", order)),
+            "trade": _trade_to_dict(trade),
+        }
+    except Exception as exc:  # noqa: BLE001 - trading API should return JSON envelopes
+        return {"status": "error", "error": str(exc), "symbol": symbol.strip().upper(), "profile": config.profile}
+    finally:
+        _disconnect(ib)
+
+
+def cancel_order(
+    config: IBKRLocalConfig,
+    order_id: str,
+    *,
+    symbol: str | None = None,
+) -> dict[str, Any]:
+    """Cancel a paper order through local TWS / IB Gateway."""
+    if config.profile != "paper":
+        return {"status": "error", "error": "IBKR local order cancellation is limited to paper profiles."}
+    if config.readonly:
+        return {"status": "error", "error": "IBKR local order cancellation requires a non-readonly paper profile."}
+    try:
+        order_id_int = int(str(order_id).strip())
+    except (TypeError, ValueError):
+        return {"status": "error", "error": "order_id must be an integer for IBKR local cancellation."}
+
+    ib = _connect(config)
+    try:
+        accounts = _managed_accounts(ib)
+        _assert_profile(config, accounts)
+        order = _find_open_order(ib, order_id_int)
+        if order is None:
+            return {
+                "status": "error",
+                "error": f"open order not found: {order_id_int}",
+                "order_id": order_id_int,
+                "symbol": symbol,
+                "profile": config.profile,
+            }
+        result = ib.cancelOrder(order)
+        _sleep(ib, 1.0)
+        return {
+            "status": "ok",
+            "order_id": order_id_int,
+            "symbol": symbol,
+            "profile": config.profile,
+            "cancel_result": _order_to_dict(result) if result is not None else _order_to_dict(order),
+        }
+    except Exception as exc:  # noqa: BLE001 - trading API should return JSON envelopes
+        return {"status": "error", "error": str(exc), "order_id": order_id_int, "symbol": symbol, "profile": config.profile}
+    finally:
+        _disconnect(ib)
+
+
 def _connect(config: IBKRLocalConfig):
     if not tcp_port_open(config.host, config.port):
         raise IBKRConnectionError(
@@ -407,6 +518,89 @@ def _connect(config: IBKRLocalConfig):
     except Exception as exc:
         raise IBKRConnectionError(f"Could not connect to TWS / IB Gateway at {config.host}:{config.port}: {exc}") from exc
     return ib
+
+
+def _validate_place_order(
+    config: IBKRLocalConfig,
+    *,
+    side: str,
+    quantity: float | None,
+    notional: float | None,
+    order_type: str,
+    limit_price: float | None,
+    time_in_force: str,
+) -> dict[str, Any] | None:
+    if config.profile != "paper":
+        return {"status": "error", "error": "IBKR local order placement is limited to paper profiles."}
+    if config.readonly:
+        return {"status": "error", "error": "IBKR local order placement requires a non-readonly paper profile."}
+    clean_side = side.strip().lower()
+    if clean_side not in {"buy", "sell"}:
+        return {"status": "error", "error": "side must be 'buy' or 'sell' for IBKR paper orders."}
+    if quantity is None:
+        return {"status": "error", "error": "IBKR paper orders require quantity; notional-only orders are not supported."}
+    if notional is not None:
+        return {"status": "error", "error": "IBKR paper orders require quantity only; notional orders are not supported."}
+    try:
+        qty = float(quantity)
+    except (TypeError, ValueError):
+        return {"status": "error", "error": "quantity must be numeric."}
+    if qty <= 0:
+        return {"status": "error", "error": "quantity must be positive."}
+    clean_type = order_type.strip().lower()
+    if clean_type not in {"market", "limit"}:
+        return {"status": "error", "error": "order_type must be 'market' or 'limit' for IBKR paper orders."}
+    if clean_type == "limit":
+        try:
+            price = float(limit_price or 0)
+        except (TypeError, ValueError):
+            return {"status": "error", "error": "limit_price must be numeric for limit orders."}
+        if price <= 0:
+            return {"status": "error", "error": "limit_price must be positive for limit orders."}
+    if time_in_force.strip().lower() not in {"day", "gtc"}:
+        return {"status": "error", "error": "time_in_force must be 'day' or 'gtc' for IBKR paper orders."}
+    return None
+
+
+def _make_order(
+    *,
+    side: str,
+    quantity: float,
+    order_type: str,
+    limit_price: float | None,
+    time_in_force: str,
+    account: str | None,
+) -> Any:
+    module = _require_ib_async()
+    action = side.strip().upper()
+    tif = time_in_force.strip().upper()
+    clean_type = order_type.strip().lower()
+    if clean_type == "market" and hasattr(module, "MarketOrder"):
+        order = module.MarketOrder(action, quantity, tif=tif)
+    elif clean_type == "limit" and hasattr(module, "LimitOrder"):
+        order = module.LimitOrder(action, quantity, float(limit_price or 0), tif=tif)
+    else:
+        order = module.Order()
+        order.action = action
+        order.totalQuantity = quantity
+        order.orderType = "MKT" if clean_type == "market" else "LMT"
+        if clean_type == "limit":
+            order.lmtPrice = float(limit_price or 0)
+        order.tif = tif
+    if account:
+        order.account = account
+    return order
+
+
+def _find_open_order(ib: Any, order_id: int) -> Any | None:
+    for trade in _safe_call(ib, "openTrades") or []:
+        order = _obj_get(trade, "order")
+        if int(_obj_get(order, "orderId", -1) or -1) == order_id:
+            return order
+    for order in _safe_call(ib, "openOrders") or []:
+        if int(_obj_get(order, "orderId", -1) or -1) == order_id:
+            return order
+    return None
 
 
 def _disconnect(ib: Any) -> None:

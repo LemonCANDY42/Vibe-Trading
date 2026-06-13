@@ -187,6 +187,64 @@ def test_service_place_order_paper_is_direct(monkeypatch) -> None:
     assert out["environment"] == "paper"
 
 
+def test_service_place_order_ibkr_paper_uses_local_tws(monkeypatch) -> None:
+    captured = {}
+
+    def _place(cfg, **kwargs):
+        captured["cfg"] = cfg
+        captured["kwargs"] = kwargs
+        return {"status": "ok", "order_id": "IBKR-PAPER-1"}
+
+    monkeypatch.setattr("src.trading.connectors.ibkr.local.place_order", _place)
+    out = service.place_order("AAPL", "ibkr-paper-trade", side="buy", quantity=1)
+
+    assert out["status"] == "ok"
+    assert out["order_id"] == "IBKR-PAPER-1"
+    assert out["profile_id"] == "ibkr-paper-trade"
+    assert out["environment"] == "paper"
+    assert out["transport"] == "local_tws"
+    assert captured["cfg"].readonly is False
+    assert captured["kwargs"]["symbol"] == "AAPL"
+    assert captured["kwargs"]["quantity"] == 1
+
+
+def test_service_place_order_ibkr_readonly_profile_stays_blocked() -> None:
+    out = service.place_order("AAPL", "ibkr-paper-local", side="buy", quantity=1)
+
+    assert out["status"] == "error"
+    assert "orders.place" in out["error"]
+    assert out["profile_id"] == "ibkr-paper-local"
+
+
+def test_service_cancel_order_ibkr_paper_uses_local_tws(monkeypatch) -> None:
+    captured = {}
+
+    def _cancel(cfg, order_id, *, symbol=None):
+        captured["cfg"] = cfg
+        captured["order_id"] = order_id
+        captured["symbol"] = symbol
+        return {"status": "ok", "order_id": int(order_id)}
+
+    monkeypatch.setattr("src.trading.connectors.ibkr.local.cancel_order", _cancel)
+    out = service.cancel_order("123", "ibkr-paper-trade", symbol="AAPL")
+
+    assert out["status"] == "ok"
+    assert out["order_id"] == 123
+    assert out["profile_id"] == "ibkr-paper-trade"
+    assert out["environment"] == "paper"
+    assert out["transport"] == "local_tws"
+    assert captured["cfg"].readonly is False
+    assert captured["symbol"] == "AAPL"
+
+
+def test_service_cancel_order_ibkr_readonly_profile_stays_blocked() -> None:
+    out = service.cancel_order("123", "ibkr-paper-local", symbol="AAPL")
+
+    assert out["status"] == "error"
+    assert "orders.cancel" in out["error"]
+    assert out["profile_id"] == "ibkr-paper-local"
+
+
 def test_service_place_order_live_routes_through_gate(monkeypatch) -> None:
     """Live profile routes through the gate; no mandate → blocked, not placed."""
     conn = _FakeConnector()
@@ -215,6 +273,16 @@ def test_trade_profiles_have_place_capability() -> None:
         prof = profiles.profile_by_id(pid)
         assert prof.readonly is False
         assert any("requires_mandate" in c for c in prof.capabilities)
+
+
+def test_trade_profiles_expose_cancel_capability() -> None:
+    from src.trading import profiles
+
+    for prof in profiles.list_profiles():
+        if prof.readonly:
+            assert "orders.cancel" not in prof.capabilities
+        elif prof.transport != "remote_mcp":
+            assert "orders.cancel" in prof.capabilities
 
 
 # --------------------------------------------------------------------------- #
