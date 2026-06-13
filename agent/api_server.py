@@ -1037,6 +1037,7 @@ def _build_response_from_run_dir(
     *,
     include_analysis: bool = False,
     chart_symbol: Optional[str] = None,
+    chart_payload: str = "full",
 ) -> RunResponse:
     """Build a run response from a persisted run directory."""
     run_id = run_dir.name
@@ -1117,10 +1118,12 @@ def _build_response_from_run_dir(
     equity_path = run_dir / "artifacts" / "equity.csv"
     if equity_path.exists():
         equity_rows = _load_csv_to_dict(equity_path)
+        if chart_payload == "full" and not chart_symbol:
+            response.artifacts_equity_csv = equity_rows
 
     metrics_csv_path = run_dir / "artifacts" / "metrics.csv"
     if metrics_csv_path.exists():
-        response.artifacts_metrics_csv = _load_csv_to_dict(metrics_csv_path, limit=200)
+        response.artifacts_metrics_csv = _load_csv_to_dict(metrics_csv_path)
 
     run_card_path = run_dir / "run_card.json"
     if run_card_path.exists():
@@ -1135,6 +1138,8 @@ def _build_response_from_run_dir(
     trades_path = run_dir / "artifacts" / "trades.csv"
     if trades_path.exists():
         trade_rows = _load_csv_to_dict(trades_path)
+        if chart_payload == "full" and not chart_symbol:
+            response.artifacts_trades_csv = trade_rows
 
     validation_path = run_dir / "artifacts" / "validation.json"
     if validation_path.exists():
@@ -1162,8 +1167,11 @@ def _build_response_from_run_dir(
         response.trade_log = trade_rows[:500]
 
     if include_analysis:
-        symbols = [chart_symbol] if chart_symbol else None
-        analysis = build_run_analysis(run_dir, symbols=symbols)
+        analysis = build_run_analysis(
+            run_dir,
+            symbols=[chart_symbol] if chart_symbol else None,
+            include_payload=chart_payload != "summary",
+        )
         response.run_stage = analysis.get("run_stage")
         response.run_context = analysis.get("run_context")
         response.chart_symbols = analysis.get("chart_symbols") or []
@@ -1348,9 +1356,24 @@ async def get_run_pine(run_id: str):
 
 
 @app.get("/runs/{run_id}", response_model=RunResponse, dependencies=[Depends(require_auth)])
-async def get_run_result(run_id: str, chart_symbol: Optional[str] = Query(None, description="Optional symbol to include in chart payload")):
-    """Fetch full details for a historical run by ``run_id``."""
+async def get_run_result(
+    run_id: str,
+    chart_symbol: Optional[str] = Query(None, description="Opt in to chart payloads for a single symbol"),
+    chart_payload: Optional[str] = Query(
+        None,
+        description="Optional chart payload mode. Use 'summary' to omit heavy chart rows from this response.",
+    ),
+):
+    """Fetch details for a historical run by ``run_id``.
+
+    The default response remains the full historical payload for backward
+    compatibility. Frontend callers that want progressive loading can opt in
+    with ``chart_payload=summary`` and then request individual symbols with
+    ``chart_symbol``.
+    """
     _validate_path_param(run_id, "run_id")
+    if chart_payload not in (None, "summary"):
+        raise HTTPException(status_code=400, detail="invalid chart_payload")
     run_dir = RUNS_DIR / run_id
 
     if not run_dir.exists():
@@ -1359,7 +1382,13 @@ async def get_run_result(run_id: str, chart_symbol: Optional[str] = Query(None, 
             detail=f"Run {run_id} not found"
         )
 
-    response = _build_response_from_run_dir(run_dir, elapsed=0.0, include_analysis=True, chart_symbol=chart_symbol)
+    response = _build_response_from_run_dir(
+        run_dir,
+        elapsed=0.0,
+        include_analysis=True,
+        chart_symbol=chart_symbol,
+        chart_payload=chart_payload or "full",
+    )
 
     return response
 

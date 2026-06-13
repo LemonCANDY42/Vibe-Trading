@@ -217,6 +217,17 @@ def test_api_run_response_filters_chart_payload_by_symbol(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
+    default_response = api_server._build_response_from_run_dir(
+        run_dir,
+        elapsed=0.0,
+        include_analysis=True,
+    )
+    summary_response = api_server._build_response_from_run_dir(
+        run_dir,
+        elapsed=0.0,
+        include_analysis=True,
+        chart_payload="summary",
+    )
     response = api_server._build_response_from_run_dir(
         run_dir,
         elapsed=0.0,
@@ -224,8 +235,17 @@ def test_api_run_response_filters_chart_payload_by_symbol(tmp_path: Path) -> Non
         chart_symbol="AAA",
     )
 
+    assert default_response.chart_symbols == ["AAA", "BBB"]
+    assert set(default_response.price_series or {}) == {"AAA", "BBB"}
+    assert {marker["code"] for marker in default_response.trade_markers or []} == {"AAA", "BBB"}
+    assert default_response.artifacts_trades_csv is not None
+    assert summary_response.chart_symbols == ["AAA", "BBB"]
+    assert summary_response.price_series == {}
+    assert summary_response.trade_markers == []
+    assert summary_response.artifacts_trades_csv is None
     assert response.chart_symbols == ["AAA", "BBB"]
     assert set(response.price_series or {}) == {"AAA"}
+    assert response.artifacts_trades_csv is None
     assert response.trade_markers == [
         {
             "time": "2026-01-02",

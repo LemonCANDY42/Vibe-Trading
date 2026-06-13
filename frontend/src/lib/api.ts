@@ -83,6 +83,7 @@ export const api = {
   getRun: (id: string, params: RunDetailParams = {}) => {
     const q = new URLSearchParams();
     if (params.chart_symbol) q.set("chart_symbol", params.chart_symbol);
+    if (params.chart_payload) q.set("chart_payload", params.chart_payload);
     const qs = q.toString();
     return request<RunData>(`/runs/${id}${qs ? `?${qs}` : ""}`);
   },
@@ -305,6 +306,7 @@ export interface RunListParams {
 
 export interface RunDetailParams {
   chart_symbol?: string;
+  chart_payload?: "summary";
 }
 
 export interface PriceBar {

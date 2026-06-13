@@ -54,7 +54,14 @@ describe("RunDetail chart loading", () => {
     apiMock.getRun.mockReset();
     apiMock.getRunCode.mockReset();
     apiMock.getRunCode.mockResolvedValue({});
-    apiMock.getRun.mockImplementation((_runId: string, params?: { chart_symbol?: string }) => {
+    apiMock.getRun.mockImplementation((_runId: string, params?: { chart_symbol?: string; chart_payload?: "summary" }) => {
+      if (params?.chart_payload === "summary") {
+        return Promise.resolve(makeRun("AAA", {
+          price_series: {},
+          indicator_series: {},
+          trade_markers: [],
+        }));
+      }
       return Promise.resolve(makeRun(params?.chart_symbol || "AAA"));
     });
   });
@@ -63,6 +70,8 @@ describe("RunDetail chart loading", () => {
     renderRunDetail();
 
     expect(await screen.findByTestId("chart-AAA")).toBeInTheDocument();
+    expect(apiMock.getRun).toHaveBeenCalledWith("run-1", { chart_payload: "summary" });
+    expect(apiMock.getRun).toHaveBeenCalledWith("run-1", { chart_symbol: "AAA" });
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "BBB" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));

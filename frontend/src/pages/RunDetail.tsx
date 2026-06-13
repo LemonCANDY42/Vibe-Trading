@@ -147,7 +147,7 @@ export function RunDetail() {
   useEffect(() => {
     if (!runId) return;
     Promise.all([
-      api.getRun(runId).catch(() => null),
+      api.getRun(runId, { chart_payload: "summary" }).catch(() => null),
       api.getRunCode(runId).catch(() => ({})),
     ]).then(([r, c]) => {
       setRun(r);
@@ -159,6 +159,9 @@ export function RunDetail() {
       const initialCache = cacheFromRun(r, firstSymbol);
       chartCacheRef.current = initialCache;
       setChartCache(initialCache);
+      if (firstSymbol && !initialCache[firstSymbol]?.price_series?.[firstSymbol]?.length) {
+        void loadChartSymbol(firstSymbol);
+      }
     }).finally(() => setLoading(false));
   }, [runId]);
 
