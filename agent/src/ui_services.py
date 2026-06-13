@@ -396,6 +396,33 @@ def load_price_series(run_dir: Path) -> List[Dict[str, Any]]:
     return reconstruct_price_series(run_dir)
 
 
+def load_chart_symbols(run_dir: Path, context: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Load chart symbol names without materializing the full chart payload."""
+    artifacts = run_dir / "artifacts"
+    price_path = artifacts / "price_series.csv"
+    symbols: set[str] = set()
+    if price_path.exists():
+        try:
+            with price_path.open("r", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                for row in reader:
+                    code = str(row.get("code") or "").strip()
+                    if code:
+                        symbols.add(code)
+        except Exception:
+            symbols.clear()
+    if not symbols and artifacts.is_dir():
+        symbols.update(
+            file_path.stem.removeprefix("ohlcv_")
+            for file_path in artifacts.glob("ohlcv_*.csv")
+            if file_path.stem.removeprefix("ohlcv_")
+        )
+    if not symbols:
+        raw_codes = (context or load_run_context(run_dir)).get("codes") or []
+        symbols.update(str(code) for code in raw_codes if code)
+    return sorted(symbols)
+
+
 def reconstruct_price_series(run_dir: Path) -> List[Dict[str, Any]]:
     """Rebuild OHLC rows for a historical run using its generated loader.
 
@@ -446,7 +473,12 @@ def reconstruct_price_series(run_dir: Path) -> List[Dict[str, Any]]:
     return _flatten_data_map(data_map, start_date=start_date)
 
 
-def build_run_analysis(run_dir: Path, symbols: Optional[List[str]] = None) -> Dict[str, Any]:
+def build_run_analysis(
+    run_dir: Path,
+    symbols: Optional[List[str]] = None,
+    *,
+    include_payload: bool = True,
+) -> Dict[str, Any]:
     """Build the analysis payload consumed by the run detail page.
 
     Args:
@@ -455,19 +487,30 @@ def build_run_analysis(run_dir: Path, symbols: Optional[List[str]] = None) -> Di
     Returns:
         A serializable dictionary of chart, trade, and log data.
     """
+    context = load_run_context(run_dir)
+    if not include_payload:
+        return {
+            "run_stage": infer_run_stage(run_dir),
+            "run_context": context,
+            "chart_symbols": load_chart_symbols(run_dir, context),
+            "price_series": {},
+            "indicator_series": {},
+            "trade_markers": [],
+            "run_logs": collect_run_logs(run_dir),
+        }
+
     price_rows = load_price_series(run_dir)
     all_symbols = sorted({str(row.get("code") or "") for row in price_rows if row.get("code")})
     requested_symbols = [symbol for symbol in (symbols or []) if symbol]
-    selected_symbols = requested_symbols or all_symbols[:1]
+    selected_symbols = requested_symbols
     selected_symbol_set = set(selected_symbols)
     if selected_symbol_set:
         price_rows = [row for row in price_rows if str(row.get("code") or "") in selected_symbol_set]
     periods = infer_indicator_periods(run_dir)
     trades = load_csv_records(run_dir / "artifacts" / "trades.csv")
-
     return {
         "run_stage": infer_run_stage(run_dir),
-        "run_context": load_run_context(run_dir),
+        "run_context": context,
         "chart_symbols": all_symbols,
         "price_series": group_price_rows(price_rows),
         "indicator_series": build_indicator_series(price_rows, periods) if price_rows else {},

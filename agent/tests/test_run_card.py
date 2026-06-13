@@ -154,6 +154,12 @@ def test_api_run_response_filters_chart_symbol_payload(tmp_path: Path) -> None:
     )
 
     default_response = api_server._build_response_from_run_dir(run_dir, elapsed=0.0, include_analysis=True)
+    summary_response = api_server._build_response_from_run_dir(
+        run_dir,
+        elapsed=0.0,
+        include_analysis=True,
+        chart_payload="summary",
+    )
     filtered_response = api_server._build_response_from_run_dir(
         run_dir,
         elapsed=0.0,
@@ -162,7 +168,13 @@ def test_api_run_response_filters_chart_symbol_payload(tmp_path: Path) -> None:
     )
 
     assert default_response.chart_symbols == ["AAA", "BBB"]
-    assert list(default_response.price_series or {}) == ["AAA"]
+    assert list(default_response.price_series or {}) == ["AAA", "BBB"]
+    assert {marker["code"] for marker in default_response.trade_markers or []} == {"AAA", "BBB"}
+    assert default_response.artifacts_trades_csv is not None
+    assert default_response.artifacts_equity_csv is None
+    assert summary_response.chart_symbols == ["AAA", "BBB"]
+    assert summary_response.price_series == {}
+    assert summary_response.trade_markers == []
     assert list(filtered_response.price_series or {}) == ["BBB"]
     assert {marker["code"] for marker in filtered_response.trade_markers or []} == {"BBB"}
     assert filtered_response.artifacts_trades_csv is None
