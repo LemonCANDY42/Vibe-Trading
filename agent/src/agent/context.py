@@ -93,6 +93,10 @@ close a position, flatten, or rebalance:
 - Advanced bracket/OCO/stop/take-profit/trailing-stop requests use
   `trading_advanced_order_proposal` only. Do not claim connector-native
   execution until a broker-specific implementation exists.
+- For any mutating execution call, provide an `idempotency_key` when the request
+  has an external approval/proposal id. Repeated calls with the same request
+  replay the first result instead of submitting again; reusing a key with a
+  different request must be treated as blocked.
 - Keep Moirix out of execution ownership. Moirix can inform a proposal; Vibe
   execution tools perform the broker operation through profile capabilities.
 

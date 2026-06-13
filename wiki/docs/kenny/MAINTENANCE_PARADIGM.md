@@ -43,6 +43,9 @@ but every mutating operation must remain capability-gated:
   quantity-target rebalance;
 - place order requires a paper profile or a live mandate-gated profile;
 - cancel order is risk-reducing but still audited for live profiles;
+- mutating Agent-facing tools must be idempotent: repeated identical requests
+  replay the first result from the persistent idempotency ledger, while reusing
+  the same key for a different request is blocked;
 - unsupported broker behavior must return blocked/error rather than being
   simulated as real execution;
 - autonomous Agent operation is allowed only inside explicit environment,

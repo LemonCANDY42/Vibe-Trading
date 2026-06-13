@@ -11,6 +11,7 @@ import json
 from typing import Any
 
 from src.agent.tools import BaseTool
+from src.trading.idempotency import idempotency_schema_property, run_once
 from src.trading.service import cancel_order, get_open_orders, get_positions, place_order
 
 
@@ -118,6 +119,10 @@ def _execute_order(plan: dict[str, Any], connection: str | None, overrides: dict
     )
 
 
+def _idempotency_key(kwargs: dict[str, Any]) -> str | None:
+    return _connection(kwargs.get("idempotency_key"))
+
+
 class TradingReplaceOrderTool(BaseTool):
     """Cancel an existing order and place a replacement order."""
 
@@ -143,6 +148,7 @@ class TradingReplaceOrderTool(BaseTool):
             "limit_price": {"type": "number"},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
             "dry_run": {"type": "boolean", "default": True},
+            "idempotency_key": idempotency_schema_property(),
         },
         "required": ["order_id", "symbol", "side"],
     }
@@ -172,12 +178,15 @@ class TradingReplaceOrderTool(BaseTool):
         }
         if dry_run:
             return _json({"status": "dry_run", **plan})
-        cancel = cancel_order(str(kwargs["order_id"]), connection, symbol=replacement["symbol"], **overrides)
-        if str(cancel.get("status") or "").lower() != "ok":
-            return _json({"status": "blocked", **plan, "cancel_result": cancel})
-        placed = _execute_order(replacement, connection, overrides)
-        status = "ok" if str(placed.get("status") or "").lower() == "ok" else "blocked"
-        return _json({"status": status, **plan, "cancel_result": cancel, "place_result": placed})
+        def _execute() -> dict[str, Any]:
+            cancel = cancel_order(str(kwargs["order_id"]), connection, symbol=replacement["symbol"], **overrides)
+            if str(cancel.get("status") or "").lower() != "ok":
+                return {"status": "blocked", **plan, "cancel_result": cancel}
+            placed = _execute_order(replacement, connection, overrides)
+            status = "ok" if str(placed.get("status") or "").lower() == "ok" else "blocked"
+            return {"status": status, **plan, "cancel_result": cancel, "place_result": placed}
+
+        return _json(run_once(tool_name=self.name, request=plan, idempotency_key=_idempotency_key(kwargs), execute=_execute))
 
 
 class TradingCancelAllOrdersTool(BaseTool):
@@ -195,6 +204,7 @@ class TradingCancelAllOrdersTool(BaseTool):
             "account": {"type": "string"},
             "symbol": {"type": "string", "description": "Optional symbol filter."},
             "dry_run": {"type": "boolean", "default": True},
+            "idempotency_key": idempotency_schema_property(),
         },
         "required": [],
     }
@@ -224,9 +234,13 @@ class TradingCancelAllOrdersTool(BaseTool):
             actions.append({"type": "cancel_order", "order_id": oid, "symbol": sym})
         if dry_run:
             return _json({"status": "dry_run", "operation": "cancel_all_orders", "dry_run": True, "actions": actions})
-        results = [cancel_order(item["order_id"], connection, symbol=item.get("symbol"), **overrides) for item in actions]
-        ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
-        return _json({"status": "ok" if ok else "blocked", "operation": "cancel_all_orders", "dry_run": False, "actions": actions, "results": results})
+        request = {"operation": "cancel_all_orders", "dry_run": False, "connection": connection, "actions": actions, "overrides": overrides}
+        def _execute() -> dict[str, Any]:
+            results = [cancel_order(item["order_id"], connection, symbol=item.get("symbol"), **overrides) for item in actions]
+            ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
+            return {"status": "ok" if ok else "blocked", "operation": "cancel_all_orders", "dry_run": False, "actions": actions, "results": results}
+
+        return _json(run_once(tool_name=self.name, request=request, idempotency_key=_idempotency_key(kwargs), execute=_execute))
 
 
 class TradingClosePositionTool(BaseTool):
@@ -248,6 +262,7 @@ class TradingClosePositionTool(BaseTool):
             "limit_price": {"type": "number"},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
             "dry_run": {"type": "boolean", "default": True},
+            "idempotency_key": idempotency_schema_property(),
         },
         "required": ["symbol"],
     }
@@ -279,8 +294,12 @@ class TradingClosePositionTool(BaseTool):
         )
         if dry_run:
             return _json({"status": "dry_run", "operation": "close_position", "dry_run": True, "actions": [{"type": "place_order", **plan}]})
-        result = _execute_order(plan, connection, overrides)
-        return _json({"status": "ok" if str(result.get("status") or "").lower() == "ok" else "blocked", "operation": "close_position", "dry_run": False, "actions": [{"type": "place_order", **plan}], "result": result})
+        request = {"operation": "close_position", "dry_run": False, "connection": connection, "actions": [{"type": "place_order", **plan}], "overrides": overrides}
+        def _execute() -> dict[str, Any]:
+            result = _execute_order(plan, connection, overrides)
+            return {"status": "ok" if str(result.get("status") or "").lower() == "ok" else "blocked", "operation": "close_position", "dry_run": False, "actions": [{"type": "place_order", **plan}], "result": result}
+
+        return _json(run_once(tool_name=self.name, request=request, idempotency_key=_idempotency_key(kwargs), execute=_execute))
 
 
 class TradingFlattenAccountTool(BaseTool):
@@ -299,6 +318,7 @@ class TradingFlattenAccountTool(BaseTool):
             "order_type": {"type": "string", "enum": ["market", "limit"], "default": "market"},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
             "dry_run": {"type": "boolean", "default": True},
+            "idempotency_key": idempotency_schema_property(),
         },
         "required": [],
     }
@@ -324,9 +344,13 @@ class TradingFlattenAccountTool(BaseTool):
             actions.append({"type": "place_order", **_planned_order(symbol=sym, side="sell" if qty > 0 else "buy", quantity=abs(qty), order_type=str(kwargs.get("order_type") or "market"), time_in_force=str(kwargs.get("time_in_force") or "day"))})
         if dry_run:
             return _json({"status": "dry_run", "operation": "flatten_account", "dry_run": True, "actions": actions})
-        results = [_execute_order({k: v for k, v in action.items() if k != "type"}, connection, overrides) for action in actions]
-        ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
-        return _json({"status": "ok" if ok else "blocked", "operation": "flatten_account", "dry_run": False, "actions": actions, "results": results})
+        request = {"operation": "flatten_account", "dry_run": False, "connection": connection, "actions": actions, "overrides": overrides}
+        def _execute() -> dict[str, Any]:
+            results = [_execute_order({k: v for k, v in action.items() if k != "type"}, connection, overrides) for action in actions]
+            ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
+            return {"status": "ok" if ok else "blocked", "operation": "flatten_account", "dry_run": False, "actions": actions, "results": results}
+
+        return _json(run_once(tool_name=self.name, request=request, idempotency_key=_idempotency_key(kwargs), execute=_execute))
 
 
 class TradingRebalanceTargetsTool(BaseTool):
@@ -353,6 +377,7 @@ class TradingRebalanceTargetsTool(BaseTool):
             "order_type": {"type": "string", "enum": ["market", "limit"], "default": "market"},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
             "dry_run": {"type": "boolean", "default": True},
+            "idempotency_key": idempotency_schema_property(),
         },
         "required": ["targets"],
     }
@@ -381,9 +406,13 @@ class TradingRebalanceTargetsTool(BaseTool):
             actions.append({"type": "place_order", **_planned_order(symbol=sym, side="buy" if delta > 0 else "sell", quantity=abs(delta), order_type=str(kwargs.get("order_type") or "market"), time_in_force=str(kwargs.get("time_in_force") or "day"))})
         if dry_run:
             return _json({"status": "dry_run", "operation": "rebalance_targets", "dry_run": True, "actions": actions})
-        results = [_execute_order({k: v for k, v in action.items() if k != "type"}, connection, overrides) for action in actions]
-        ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
-        return _json({"status": "ok" if ok else "blocked", "operation": "rebalance_targets", "dry_run": False, "actions": actions, "results": results})
+        request = {"operation": "rebalance_targets", "dry_run": False, "connection": connection, "actions": actions, "overrides": overrides}
+        def _execute() -> dict[str, Any]:
+            results = [_execute_order({k: v for k, v in action.items() if k != "type"}, connection, overrides) for action in actions]
+            ok = all(str(item.get("status") or "").lower() == "ok" for item in results)
+            return {"status": "ok" if ok else "blocked", "operation": "rebalance_targets", "dry_run": False, "actions": actions, "results": results}
+
+        return _json(run_once(tool_name=self.name, request=request, idempotency_key=_idempotency_key(kwargs), execute=_execute))
 
 
 class TradingAdvancedOrderProposalTool(BaseTool):

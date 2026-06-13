@@ -10,6 +10,7 @@ from typing import Any
 
 from src.agent.tools import BaseTool
 from src.tools._moirix_adapter import adapter_artifact_dir, resolve_adapter_input
+from src.trading.idempotency import idempotency_schema_property, run_once
 from src.trading.profiles import profile_by_id
 from src.trading.service import place_order
 
@@ -52,6 +53,7 @@ class MoirixTradeExecutionTool(BaseTool):
                 "description": "When true, validates and writes execution_status.json without placing orders.",
                 "default": True,
             },
+            "idempotency_key": idempotency_schema_property(),
         },
         "required": ["approval_path"],
     }
@@ -124,33 +126,49 @@ class MoirixTradeExecutionTool(BaseTool):
             )
             return _write_and_return(out_dir, payload)
 
-        broker_results = []
-        for order in proposal.get("orders", []):
-            if not isinstance(order, dict):
-                continue
-            result = place_order(
-                str(order.get("symbol") or ""),
-                str(kwargs.get("connection") or "").strip(),
-                side=str(order.get("side") or ""),
-                quantity=_num_or_none(order.get("quantity")),
-                notional=_num_or_none(order.get("notional")),
-                order_type=str(order.get("order_type") or "market"),
-                limit_price=_num_or_none(order.get("limit_price")),
-                time_in_force=str(order.get("time_in_force") or "day"),
+        def _execute() -> dict[str, Any]:
+            broker_results = []
+            for order in proposal.get("orders", []):
+                if not isinstance(order, dict):
+                    continue
+                result = place_order(
+                    str(order.get("symbol") or ""),
+                    str(kwargs.get("connection") or "").strip(),
+                    side=str(order.get("side") or ""),
+                    quantity=_num_or_none(order.get("quantity")),
+                    notional=_num_or_none(order.get("notional")),
+                    order_type=str(order.get("order_type") or "market"),
+                    limit_price=_num_or_none(order.get("limit_price")),
+                    time_in_force=str(order.get("time_in_force") or "day"),
+                )
+                broker_results.append(result)
+                if str(result.get("status") or "").lower() == "error":
+                    break
+            status = "ok" if broker_results and all(str(item.get("status") or "").lower() != "error" for item in broker_results) else "blocked"
+            payload = _status(
+                status=status,
+                proposal_hash=proposal_hash,
+                execution_mode=execution_mode,
+                connection=str(kwargs.get("connection") or "").strip(),
+                broker_results=broker_results,
             )
-            broker_results.append(result)
-            if str(result.get("status") or "").lower() == "error":
-                break
-        status = "ok" if broker_results and all(str(item.get("status") or "").lower() != "error" for item in broker_results) else "blocked"
-        payload = _status(
-            status=status,
-            proposal_hash=proposal_hash,
-            execution_mode=execution_mode,
-            connection=str(kwargs.get("connection") or "").strip(),
-            broker_results=broker_results,
+            if status != "ok":
+                payload["claim_gate"]["blockers"].append("moirix_execution_broker_rejected_or_unavailable")
+            return payload
+
+        request = {
+            "proposal_hash": proposal_hash,
+            "approval_path": str(approval_path),
+            "execution_mode": execution_mode,
+            "connection": str(kwargs.get("connection") or "").strip(),
+            "orders": proposal.get("orders", []),
+        }
+        payload = run_once(
+            tool_name=self.name,
+            request=request,
+            idempotency_key=str(kwargs.get("idempotency_key") or "").strip() or proposal_hash,
+            execute=_execute,
         )
-        if status != "ok":
-            payload["claim_gate"]["blockers"].append("moirix_execution_broker_rejected_or_unavailable")
         return _write_and_return(out_dir, payload)
 
     def _resolve_proposal(self, kwargs: dict[str, Any], run_dir: str) -> tuple[Path | None, dict[str, Any] | None]:

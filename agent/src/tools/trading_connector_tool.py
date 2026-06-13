@@ -10,6 +10,7 @@ import json
 from typing import Any
 
 from src.agent.tools import BaseTool
+from src.trading.idempotency import idempotency_schema_property, run_once
 from src.trading.profiles import (
     list_profiles,
     load_selected_profile_id,
@@ -335,6 +336,7 @@ class TradingPlaceOrderTool(BaseTool):
             "order_type": {"type": "string", "enum": ["market", "limit"], "default": "market"},
             "limit_price": {"type": "number", "description": "Required for limit orders."},
             "time_in_force": {"type": "string", "enum": ["day", "gtc"], "default": "day"},
+            "idempotency_key": idempotency_schema_property(),
         },
         "required": ["symbol", "side"],
     }
@@ -344,8 +346,23 @@ class TradingPlaceOrderTool(BaseTool):
     def execute(self, **kwargs: Any) -> str:
         """Place an order via the connector profile."""
         try:
+            request = {
+                "connection": _connection(kwargs.get("connection")),
+                "symbol": str(kwargs["symbol"]),
+                "side": str(kwargs.get("side") or ""),
+                "quantity": _num_or_none(kwargs.get("quantity")),
+                "notional": _num_or_none(kwargs.get("notional")),
+                "order_type": str(kwargs.get("order_type") or "market"),
+                "limit_price": _num_or_none(kwargs.get("limit_price")),
+                "time_in_force": str(kwargs.get("time_in_force") or "day"),
+                "overrides": _overrides(kwargs),
+            }
             return _json_result(
-                place_order(
+                run_once(
+                    tool_name=self.name,
+                    request=request,
+                    idempotency_key=_connection(kwargs.get("idempotency_key")),
+                    execute=lambda: place_order(
                     str(kwargs["symbol"]),
                     _connection(kwargs.get("connection")),
                     side=str(kwargs.get("side") or ""),
@@ -355,6 +372,7 @@ class TradingPlaceOrderTool(BaseTool):
                     limit_price=_num_or_none(kwargs.get("limit_price")),
                     time_in_force=str(kwargs.get("time_in_force") or "day"),
                     **_overrides(kwargs),
+                    ),
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -372,6 +390,7 @@ class TradingCancelOrderTool(BaseTool):
             **TRADING_COMMON_PARAMETERS,
             "order_id": {"type": "string", "description": "Broker order id to cancel."},
             "symbol": {"type": "string", "description": "Symbol (required by some brokers, e.g. OKX/Binance)."},
+            "idempotency_key": idempotency_schema_property(),
         },
         "required": ["order_id"],
     }
@@ -381,12 +400,23 @@ class TradingCancelOrderTool(BaseTool):
     def execute(self, **kwargs: Any) -> str:
         """Cancel an order via the connector profile."""
         try:
+            request = {
+                "connection": _connection(kwargs.get("connection")),
+                "order_id": str(kwargs["order_id"]),
+                "symbol": _connection(kwargs.get("symbol")),
+                "overrides": _overrides(kwargs),
+            }
             return _json_result(
-                cancel_order(
+                run_once(
+                    tool_name=self.name,
+                    request=request,
+                    idempotency_key=_connection(kwargs.get("idempotency_key")),
+                    execute=lambda: cancel_order(
                     str(kwargs["order_id"]),
                     _connection(kwargs.get("connection")),
                     symbol=_connection(kwargs.get("symbol")),
                     **_overrides(kwargs),
+                    ),
                 )
             )
         except Exception as exc:  # noqa: BLE001
