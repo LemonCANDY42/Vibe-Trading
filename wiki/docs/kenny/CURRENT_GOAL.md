@@ -1,4 +1,4 @@
-# Current Goal: Moirix Agent-Driven Event Thesis And Position Decision Workflow
+# Current Goal: Daily Moirix/Vibe Decision Reliability
 
 ## Source Of Truth
 
@@ -8,7 +8,8 @@
 - Upstream sync policy: `wiki/docs/kenny/UPSTREAM_SYNC_POLICY.md`
 
 The historical PRD remains useful background, but the current canonical goal is
-the event-thesis plus position-decision workflow. Any old instruction that makes
+the event-thesis plus position-decision workflow hardened enough for serious
+daily research operations. Any old instruction that makes
 `event_impact_graph.json`, edge weights, `event_signal.csv`, or forward-return
 studies the main Moirix output is superseded.
 
@@ -28,8 +29,9 @@ presets, and Moirix UI panels.
 
 ## Objective
 
-Turn the Kenny fork's Moirix integration into an Agent-driven event thesis and
-position decision workflow:
+Make the Kenny fork's Moirix/Vibe workflow reliable enough for daily
+public-equity decision operations while keeping real-money execution authority
+disabled by default. The target workflow is:
 
 ```text
 PIT evidence
@@ -39,8 +41,8 @@ PIT evidence
   -> bull/bear/risk synthesis
   -> research-only event thesis artifacts
   -> research-only position decision and trade proposal artifacts
-  -> research-only backtest projection artifacts when historical evaluation is requested
-  -> explicit paper execution gate when separately approved
+  -> sized, research-only backtest projection artifacts when historical evaluation is requested
+  -> explicit paper execution gate when separately approved and idempotency gates pass
 ```
 
 Moirix remains optional and fail-closed. Vibe remains the primary research
@@ -53,12 +55,29 @@ profile remains `ibkr-paper-local`; paper order execution uses the separate
 `ibkr-paper-trade` profile only after an explicit paper approval artifact and
 execution gate pass. IBKR live profiles remain read-only.
 
+Daily reliability means:
+
+- every Moirix adapter call that writes run artifacts also writes
+  `adapter_call_status.json` with phase, status, timeout, blockers, command
+  source, cwd, and fail-closed state;
+- every accepted thesis is grounded in PIT `news_evidence.jsonl`;
+- every position decision is grounded in a thesis and read-only portfolio
+  context;
+- every backtest projection maps risk sizing into `target_weight` when a
+  portfolio base is available, or uses explicit `risk_sizing.target_weight`
+  when the Agent provides a bounded target exposure directly;
+- every paper execution attempt uses the same request hash and approval hash
+  that the gate evaluated;
+- repeated execution requests are idempotent and append to the audit ledger
+  rather than silently placing duplicate orders.
+
 ## Canonical Outcome
 
 A successful Moirix thesis run writes:
 
 ```text
 artifacts/moirix/news_evidence.jsonl
+artifacts/moirix/adapter_call_status.json
 artifacts/moirix/event_thesis_graph.json
 artifacts/moirix/event_thesis_report.md
 artifacts/moirix/event_decision_context.json
@@ -102,6 +121,8 @@ feat/moirix-event-graph-extension-v0
 
 Current stage:
 
+- harden `moirix_query_news` and the shared adapter wrapper so timeouts and
+  adapter failures leave `adapter_call_status.json` instead of hanging silently;
 - harden `moirix_write_event_thesis` so a thesis is accepted only when
   `news_evidence.jsonl`, `request.json`, `status.json`, and
   `coverage_status.json` prove a nonblocked `query-news` result with matching
@@ -115,7 +136,8 @@ Current stage:
   append-only paper audit ledger;
 - keep `ibkr-paper-trade` paper-only and block `client_id=0` write paths;
 - make `moirix_export_decision_projection` produce a tested Vibe signal-engine
-  consumer template for backtests.
+  consumer template that uses `target_weight` from risk sizing when portfolio
+  base is available and clearly degrades to direction-only when it is not.
 
 ## In Scope
 
@@ -153,8 +175,11 @@ Current stage:
 
 - Tool registry exposes the canonical Moirix tools and not the removed
   graph/signal/backtest tools.
+- `moirix_query_news` and adapter-backed tools write `adapter_call_status.json`
+  and fail closed on timeout, invalid JSON, blocked source coverage, or adapter
+  unavailability.
 - `moirix_write_event_thesis` writes thesis/report/authority artifacts when
-- matching nonblocked PIT evidence exists.
+  matching nonblocked PIT evidence exists.
 - `moirix_write_event_thesis` rejects empty evidence, non-`query-news`
   request artifacts, future `visible_at`, and thesis event IDs not present in
   PIT evidence.
@@ -172,8 +197,12 @@ Current stage:
 - `moirix_export_decision_projection` writes a Vibe-compatible signal-engine
   template and manifest pointer so the projection has a tested backtest
   consumption path.
+- `moirix_export_decision_projection` writes `target_weight`,
+  `max_position_notional`, `max_loss_notional`, and `weight_basis`; when an
+  explicit target weight or portfolio-derived target weight is available, the
+  signal engine uses it rather than full notional direction.
 - `moirix_execute_trade_proposal` blocks when approval authority, proposal hash,
-- request hash, account, connector profile, expiry, max notional, kill switch,
+  request hash, account, connector profile, expiry, max notional, kill switch,
   or execution mode is missing or unsafe.
 - Agent-facing paper mutating trading tools require explicit approval when
   `dry_run=false`, derive idempotency from approval/request hash, and append to

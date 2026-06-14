@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -151,16 +152,52 @@ def resolve_adapter_input(
 
 def call_adapter(args: list[str], *, out_dir: Path | None = None, timeout_seconds: int = 120) -> dict[str, Any]:
     """Call the Moirix adapter and parse its JSON stdout."""
+    started_at = _utc_now()
     command = _resolve_adapter_command()
-    if command is None:
-        return _unavailable_payload(
-            "moirix_adapter_unavailable",
-            (
-                "Moirix adapter command was not found. Set MOIRIX_ADAPTER_CMD, "
-                "install moirix_vibe_adapter, or set MOIRIX_REPO_DIR to a local Moirix checkout."
-            ),
-            out_dir=out_dir,
+
+    def finish(payload: dict[str, Any]) -> dict[str, Any]:
+        if out_dir is not None:
+            artifacts = payload.get("artifacts")
+            if not isinstance(artifacts, dict):
+                artifacts = {}
+                payload["artifacts"] = artifacts
+            artifacts.setdefault("adapter_call_status", str(out_dir / "adapter_call_status.json"))
+        _write_adapter_call_status(
+            out_dir,
+            payload=payload,
+            args=args,
+            command=command,
+            timeout_seconds=timeout_seconds,
+            started_at=started_at,
         )
+        return payload
+
+    if command is None:
+        return finish(
+            _unavailable_payload(
+                "moirix_adapter_unavailable",
+                (
+                    "Moirix adapter command was not found. Set MOIRIX_ADAPTER_CMD, "
+                    "install moirix_vibe_adapter, or set MOIRIX_REPO_DIR to a local Moirix checkout."
+                ),
+                out_dir=out_dir,
+            )
+        )
+
+    try:
+        timeout_seconds = max(1, min(int(timeout_seconds), 3600))
+    except (TypeError, ValueError):
+        timeout_seconds = 120
+
+    _write_adapter_call_status(
+        out_dir,
+        payload={"status": "running", "claim_gate": {"blockers": []}},
+        args=args,
+        command=command,
+        timeout_seconds=timeout_seconds,
+        started_at=started_at,
+        phase="running",
+    )
 
     try:
         process = subprocess.run(
@@ -176,70 +213,84 @@ def call_adapter(args: list[str], *, out_dir: Path | None = None, timeout_second
             env=_adapter_env(),
         )
     except subprocess.TimeoutExpired:
-        return _unavailable_payload(
-            "moirix_adapter_timeout",
-            f"Moirix adapter timed out after {timeout_seconds}s",
-            command=command,
-            out_dir=out_dir,
+        return finish(
+            _unavailable_payload(
+                "moirix_adapter_timeout",
+                f"Moirix adapter timed out after {timeout_seconds}s",
+                command=command,
+                out_dir=out_dir,
+            )
         )
     except Exception as exc:  # noqa: BLE001 - return a clean tool envelope.
-        return _unavailable_payload(
-            "moirix_adapter_invocation_failed",
-            redact_internal_paths(str(exc)),
-            command=command,
-            out_dir=out_dir,
+        return finish(
+            _unavailable_payload(
+                "moirix_adapter_invocation_failed",
+                redact_internal_paths(str(exc)),
+                command=command,
+                out_dir=out_dir,
+            )
         )
 
     if process.returncode != 0:
-        return _unavailable_payload(
-            "moirix_adapter_nonzero_exit",
-            f"Moirix adapter exited with code {process.returncode}",
-            command=command,
-            out_dir=out_dir,
-            extra={
-                "exit_code": process.returncode,
-                "stderr": redact_internal_paths(process.stderr[-2000:]),
-            },
+        return finish(
+            _unavailable_payload(
+                "moirix_adapter_nonzero_exit",
+                f"Moirix adapter exited with code {process.returncode}",
+                command=command,
+                out_dir=out_dir,
+                extra={
+                    "exit_code": process.returncode,
+                    "stderr": redact_internal_paths(process.stderr[-2000:]),
+                },
+            )
         )
 
     stdout = process.stdout.strip()
     try:
         payload = json.loads(stdout)
     except (json.JSONDecodeError, ValueError):
-        return _unavailable_payload(
-            "moirix_adapter_invalid_json",
-            "Moirix adapter stdout was not a single JSON object",
-            command=command,
-            out_dir=out_dir,
-            extra={"stdout_preview": stdout[:500]},
+        return finish(
+            _unavailable_payload(
+                "moirix_adapter_invalid_json",
+                "Moirix adapter stdout was not a single JSON object",
+                command=command,
+                out_dir=out_dir,
+                extra={"stdout_preview": stdout[:500]},
+            )
         )
 
     if not isinstance(payload, dict):
-        return _unavailable_payload(
-            "moirix_adapter_invalid_json_shape",
-            "Moirix adapter stdout JSON was not an object",
-            command=command,
-            out_dir=out_dir,
+        return finish(
+            _unavailable_payload(
+                "moirix_adapter_invalid_json_shape",
+                "Moirix adapter stdout JSON was not an object",
+                command=command,
+                out_dir=out_dir,
+            )
         )
 
     violations = _authority_contract_violations(payload)
     if violations:
-        return _blocked_payload(
-            "moirix_authority_contract_violation",
-            "Moirix adapter returned authority fields outside the V0 fail-closed contract",
-            command=command,
-            out_dir=out_dir,
-            extra={"violations": violations, "moirix_payload": payload},
+        return finish(
+            _blocked_payload(
+                "moirix_authority_contract_violation",
+                "Moirix adapter returned authority fields outside the V0 fail-closed contract",
+                command=command,
+                out_dir=out_dir,
+                extra={"violations": violations, "moirix_payload": payload},
+            )
         )
 
     artifact_violations = _artifact_contract_violations(payload, out_dir)
     if artifact_violations:
-        return _blocked_payload(
-            "moirix_artifact_contract_violation",
-            "Moirix adapter returned artifact paths outside the Vibe run artifact directory",
-            command=command,
-            out_dir=out_dir,
-            extra={"violations": artifact_violations, "moirix_payload": payload},
+        return finish(
+            _blocked_payload(
+                "moirix_artifact_contract_violation",
+                "Moirix adapter returned artifact paths outside the Vibe run artifact directory",
+                command=command,
+                out_dir=out_dir,
+                extra={"violations": artifact_violations, "moirix_payload": payload},
+            )
         )
 
     status = str(payload.get("status") or "")
@@ -258,7 +309,47 @@ def call_adapter(args: list[str], *, out_dir: Path | None = None, timeout_second
         "cwd": str(command.cwd) if command.cwd else None,
         "artifacts_root": str(out_dir) if out_dir else None,
     }
-    return payload
+    return finish(payload)
+
+
+def _write_adapter_call_status(
+    out_dir: Path | None,
+    *,
+    payload: dict[str, Any],
+    args: list[str],
+    command: AdapterCommand | None,
+    timeout_seconds: int,
+    started_at: str,
+    phase: str = "completed",
+) -> None:
+    """Persist a bounded progress/status artifact for one adapter call."""
+    if out_dir is None:
+        return
+    try:
+        claim_gate = payload.get("claim_gate") if isinstance(payload.get("claim_gate"), dict) else {}
+        raw_blockers = claim_gate.get("blockers")
+        blockers = [str(item) for item in raw_blockers] if isinstance(raw_blockers, list) else []
+        status = str(payload.get("status") or "unknown")
+        status_payload = {
+            "schema_version": "vibe.moirix_adapter_call_status.v1",
+            "phase": phase,
+            "status": status,
+            "started_at": started_at,
+            "updated_at": _utc_now(),
+            "timeout_seconds": timeout_seconds,
+            "adapter_args": list(args),
+            "command_source": command.source if command else None,
+            "cwd": str(command.cwd) if command and command.cwd else None,
+            "blockers": blockers,
+            "fail_closed": status in {"blocked", "unavailable"} or bool(blockers),
+        }
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "adapter_call_status.json").write_text(
+            json.dumps(status_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def _resolve_adapter_command() -> AdapterCommand | None:
@@ -462,3 +553,7 @@ def _blocked_payload(
     if extra:
         payload.update(extra)
     return payload
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()

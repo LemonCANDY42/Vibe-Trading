@@ -6,6 +6,7 @@ import json
 import sys
 import hashlib
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -35,6 +36,7 @@ FALSE_AUTHORITY = {
 }
 
 STANDARD_MOIRIX_ARTIFACT_KEYS = {
+    "adapter_call_status",
     "status",
     "request",
     "coverage_status",
@@ -144,6 +146,12 @@ elif command == "authority-check":
         "claim_gate": {"blockers": ["broker_write_requested", "submit_order_requested"]},
         "artifacts": common,
     }))
+elif command == "sleep":
+    out = Path(arg("--out")).resolve()
+    write_common(out, "ok")
+    import time
+    time.sleep(2)
+    print(json.dumps({"status": "ok", "authority": AUTHORITY, "claim_gate": {"blockers": []}}))
 else:
     print(json.dumps({"status": "unavailable", "authority": AUTHORITY, "claim_gate": {"blockers": ["unknown_command"]}}))
 '''
@@ -416,6 +424,36 @@ def test_query_news_preserves_blocked_and_writes_no_fake_evidence(
     assert not (run_dir / "artifacts" / "moirix" / "news_evidence.jsonl").exists()
     assert (run_dir / "artifacts" / "moirix" / "vibe_run_card_patch.json").exists()
     assert STANDARD_MOIRIX_ARTIFACT_KEYS <= set(payload["artifacts"])
+    adapter_status = json.loads((run_dir / "artifacts" / "moirix" / "adapter_call_status.json").read_text())
+    assert adapter_status["schema_version"] == "vibe.moirix_adapter_call_status.v1"
+    assert adapter_status["phase"] == "completed"
+    assert adapter_status["status"] == "blocked"
+    assert adapter_status["fail_closed"] is True
+    assert "fixture_source_lake_blocked" in adapter_status["blockers"]
+
+
+def test_adapter_call_status_records_timeout_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _use_fake_adapter(tmp_path, monkeypatch)
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    out_dir = run_dir / "artifacts" / "moirix"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    started = time.monotonic()
+    payload = moirix_adapter.call_adapter(["sleep", "--out", str(out_dir)], out_dir=out_dir, timeout_seconds=1)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 3
+    assert payload["status"] == "unavailable"
+    assert "moirix_adapter_timeout" in payload["claim_gate"]["blockers"]
+    adapter_status = json.loads((out_dir / "adapter_call_status.json").read_text())
+    assert adapter_status["status"] == "unavailable"
+    assert adapter_status["phase"] == "completed"
+    assert adapter_status["timeout_seconds"] == 1
+    assert adapter_status["fail_closed"] is True
+    assert "moirix_adapter_timeout" in adapter_status["blockers"]
 
 
 def test_write_event_thesis_requires_pit_evidence(
@@ -716,9 +754,13 @@ def test_export_decision_projection_writes_backtest_artifacts(
     csv_text = (out / "decision_projection.csv").read_text(encoding="utf-8")
     assert "NVDA" in csv_text
     assert "broker_submit_allowed" in csv_text
+    assert "target_weight" in csv_text
+    assert "0.025" in csv_text
     manifest = json.loads((out / "backtest_projection_manifest.json").read_text(encoding="utf-8"))
     assert manifest["usage"].startswith("Backtest projection only")
     assert manifest["vibe_backtest_consumer"]["type"] == "signal_engine_template"
+    assert manifest["projection_context"]["sizing_mode"] == "risk_sizing_target_weight"
+    assert manifest["projection_context"]["portfolio_base"] == 100000.0
     assert manifest["authority"]["broker_submit_allowed"] is False
 
     import pandas as pd
@@ -730,7 +772,109 @@ def test_export_decision_projection_writes_backtest_artifacts(
     module = _load_module_from_file(code_path, "projection_signal_engine_test")
     index = pd.to_datetime(["2025-05-01", "2025-05-03", "2025-05-11"])
     signals = module.SignalEngine().generate({"NVDA": pd.DataFrame({"close": [1.0, 1.1, 1.2]}, index=index)})
-    assert list(signals["NVDA"]) == [0.0, 1.0, 0.0]
+    assert list(signals["NVDA"]) == [0.0, 0.025, 0.0]
+
+
+def test_export_decision_projection_accepts_explicit_target_weight_without_max_notional(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    decision = _valid_decision()
+    decision["risk_sizing"] = {
+        "target_weight": 0.15,
+        "max_loss_notional": 250,
+        "portfolio_impact": "explicit 15 percent target exposure",
+    }
+
+    write_payload = json.loads(
+        MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(decision))
+    )
+    assert write_payload["status"] == "ok"
+    payload = json.loads(MoirixDecisionProjectionTool().execute(run_dir=str(run_dir), projection_mode="window"))
+
+    out = run_dir / "artifacts" / "moirix"
+    assert payload["status"] == "ok"
+    csv_text = (out / "decision_projection.csv").read_text(encoding="utf-8")
+    assert "0.15" in csv_text
+    assert "risk_sizing.target_weight" in csv_text
+    manifest = json.loads((out / "backtest_projection_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["projection_context"]["sizing_mode"] == "explicit_target_weight"
+    assert manifest["projection_context"]["weight_basis"] == "risk_sizing.target_weight"
+
+
+def test_export_decision_projection_trim_uses_current_position_weight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    decision = _valid_decision()
+    decision["action"] = "trim"
+    decision["risk_sizing"] = {
+        "max_position_notional": 400,
+        "max_loss_notional": 100,
+        "portfolio_impact": "trim current exposure by four tenths of one percent",
+    }
+    decision["proposed_orders"] = [
+        {
+            "symbol": "NVDA",
+            "side": "sell",
+            "order_type": "market",
+            "notional": 400,
+            "time_in_force": "day",
+        }
+    ]
+    MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(decision))
+    payload = json.loads(MoirixDecisionProjectionTool().execute(run_dir=str(run_dir), projection_mode="window"))
+
+    out = run_dir / "artifacts" / "moirix"
+    assert payload["status"] == "ok"
+    rows = json.loads((out / "decision_projection.json").read_text(encoding="utf-8"))["rows"]
+    assert rows[0]["target_weight"] == pytest.approx(0.005)
+
+    import pandas as pd
+    from backtest.runner import _load_module_from_file
+
+    code_path = run_dir / "code" / "signal_engine.py"
+    code_path.parent.mkdir(parents=True, exist_ok=True)
+    code_path.write_text((out / "decision_projection_signal_engine.py").read_text(encoding="utf-8"), encoding="utf-8")
+    module = _load_module_from_file(code_path, "projection_signal_engine_trim_test")
+    index = pd.to_datetime(["2025-05-01", "2025-05-03", "2025-05-11"])
+    signals = module.SignalEngine().generate({"NVDA": pd.DataFrame({"close": [1.0, 1.1, 1.2]}, index=index)})
+    assert list(signals["NVDA"]) == pytest.approx([0.0, 0.005, 0.0])
+
+
+def test_export_decision_projection_trim_without_position_value_does_not_fake_weight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    _write_thesis_and_context(run_dir)
+    context_path = run_dir / "artifacts" / "moirix" / "event_decision_context.json"
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    context["positions"] = [{"symbol": "NVDA", "position": 10}]
+    context_path.write_text(json.dumps(context), encoding="utf-8")
+    decision = _valid_decision()
+    decision["action"] = "trim"
+    decision["proposed_orders"] = [
+        {
+            "symbol": "NVDA",
+            "side": "sell",
+            "order_type": "market",
+            "notional": 400,
+            "time_in_force": "day",
+        }
+    ]
+    MoirixPositionDecisionTool().execute(run_dir=str(run_dir), decision_json=json.dumps(decision))
+    payload = json.loads(MoirixDecisionProjectionTool().execute(run_dir=str(run_dir), projection_mode="window"))
+
+    out = run_dir / "artifacts" / "moirix"
+    assert payload["status"] == "ok"
+    rows = json.loads((out / "decision_projection.json").read_text(encoding="utf-8"))["rows"]
+    assert rows[0]["target_weight"] == ""
+    assert rows[0]["weight_basis"] == "current_position_required"
 
 
 def test_execute_trade_proposal_blocks_readonly_paper_connection(

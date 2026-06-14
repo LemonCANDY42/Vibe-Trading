@@ -424,7 +424,7 @@ vibe-trading-mcp</code></pre>
             title: "Current scope",
             body: `
               <p>The current branch implements the optional local adapter wrapper and canonical thesis/decision tools: <code>moirix_status</code>, <code>moirix_query_news</code>, <code>moirix_portfolio_context</code>, <code>moirix_write_event_thesis</code>, <code>moirix_write_position_decision</code>, <code>moirix_export_decision_projection</code>, <code>moirix_execute_trade_proposal</code>, <code>moirix_authority_guard</code>, <code>moirix-event-graph</code>, <code>moirix_event_thesis_committee</code>, and <code>moirix_position_decision_committee</code>.</p>
-              <p>It removes the old numeric event-impact graph / event_signal path from the Vibe tool surface. It can design research-only trade proposals, export research-only backtest projections, and includes a fail-closed paper execution gate, but it does not grant real-money authority, auto-enable IBKR paper submission, or fake PIT evidence when Moirix is blocked or unavailable.</p>
+              <p>It removes the old numeric event-impact graph / event_signal path from the Vibe tool surface. It can design research-only trade proposals, export portfolio-aware backtest projections with <code>target_weight</code>, and includes fail-closed adapter status artifacts plus a paper execution gate. It does not grant real-money authority, auto-enable IBKR paper submission, or fake PIT evidence when Moirix is blocked or unavailable.</p>
             `
           },
           {

@@ -203,9 +203,13 @@ def _validate_decision(decision: dict[str, Any]) -> list[str]:
     if not isinstance(risk_sizing, dict):
         errors.append("risk_sizing must be an object")
     else:
-        for key in ("max_position_notional", "max_loss_notional", "portfolio_impact"):
+        for key in ("max_loss_notional", "portfolio_impact"):
             if key not in risk_sizing:
                 errors.append(f"risk_sizing.{key} is required")
+        if not _positive_number(risk_sizing.get("max_position_notional")) and not _valid_target_weight(
+            risk_sizing.get("target_weight")
+        ):
+            errors.append("risk_sizing.max_position_notional or risk_sizing.target_weight is required")
 
     orders = decision.get("proposed_orders")
     if orders is None:
@@ -401,6 +405,16 @@ def _positive_number(value: Any) -> bool:
         return float(value) > 0
     except (TypeError, ValueError):
         return False
+
+
+def _valid_target_weight(value: Any) -> bool:
+    if value in (None, ""):
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return -1.0 <= number <= 1.0
 
 
 def _md_cell(value: Any) -> str:

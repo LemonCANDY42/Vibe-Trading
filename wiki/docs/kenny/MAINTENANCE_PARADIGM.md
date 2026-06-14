@@ -114,6 +114,9 @@ Moirix integration must continue to run as optional local tools:
 - blocked source coverage returns `status: "blocked"`;
 - invalid adapter JSON returns `status: "unavailable"`;
 - unknown adapter status is converted to `status: "blocked"`;
+- adapter-backed calls that write run artifacts also write
+  `adapter_call_status.json` with status, timeout, blockers, command source,
+  cwd, and fail-closed state;
 - Vibe reports the Moirix state directly rather than fabricating PIT evidence.
 
 ### 4. Use Thesis-First Event Reasoning
@@ -144,6 +147,7 @@ The canonical artifacts are:
 
 ```text
 artifacts/moirix/news_evidence.jsonl
+artifacts/moirix/adapter_call_status.json
 artifacts/moirix/event_thesis_graph.json
 artifacts/moirix/event_thesis_report.md
 artifacts/moirix/event_decision_context.json
@@ -180,7 +184,12 @@ connector capability, profile environment, or authority is ambiguous.
 
 Backtest projection is not execution. Projection artifacts may be used by Vibe
 backtests, but they must remain research-only and carry false broker/real-money
-authority fields.
+authority fields. Serious Moirix decision backtests should consume
+`target_weight` from explicit risk sizing or derived from max notional and
+portfolio context. Direction-only signals are an explicit degraded fallback when
+no portfolio base or sizing context exists. Partial `trim`, `sell`, and `cover`
+projections require explicit target weight or current position value; do not
+silently model them as full flat targets.
 
 The proposal remains research-only by default. A separate paper execution
 approval artifact may grant `paper_trade_proposal_allowed=true` and

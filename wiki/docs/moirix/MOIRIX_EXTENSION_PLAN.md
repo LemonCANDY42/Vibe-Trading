@@ -42,6 +42,24 @@ Historical local run files from the removed numeric workflow are not part of the
 canonical Moirix UI/API preview and should not be used as success evidence for
 new work.
 
+## Daily Reliability Contract
+
+The daily operating target is serious research and paper/live-readiness, not a
+one-off demo. Adapter calls, decision projections, and execution gates therefore
+need deterministic artifacts:
+
+- adapter-backed Moirix tools write `adapter_call_status.json` whenever they
+  write under `artifacts/moirix/`;
+- adapter timeout, invalid JSON, blocked source coverage, and unavailable
+  commands all fail closed and preserve their blockers;
+- decision projection uses portfolio-aware `target_weight` when a portfolio
+  base and risk sizing are available;
+- direction-only projection is a degraded fallback, not the preferred serious
+  backtest mode;
+- paper execution uses approval/request hashes and audit-ledger idempotency;
+- real-money auto-submit remains disabled unless a separate future goal grants
+  it explicitly.
+
 ## Ownership Boundary
 
 Vibe owns:
@@ -77,6 +95,7 @@ artifacts/moirix/
   status.json
   request.json
   coverage_status.json
+  adapter_call_status.json
   news_evidence.jsonl
   event_thesis_graph.json
   event_thesis_report.md
@@ -128,14 +147,25 @@ It must include:
 - decision action: `buy`, `sell`, `short`, `cover`, `add`, `trim`, `exit`,
   `hold`, `watch`, `hedge`, or `blocked`;
 - rationale, invalidation triggers, execution window, and risk notes;
-- risk sizing fields such as max notional, max loss, stop reference, and
-  portfolio impact;
+- risk sizing fields such as explicit target weight or max notional, max loss,
+  stop reference, and portfolio impact;
 - authority fields.
 
 `decision_projection.csv` and `decision_projection.json` are Vibe-side backtest
 projection artifacts. They are derived from a position decision and normalized
 trade proposal so historical tests can evaluate the decision logic. They are
-not Moirix evidence, not event weights, and not broker orders.
+not Moirix evidence, not event weights, and not broker orders. When
+`event_decision_context.json` exposes a positive portfolio base and the decision
+contains `risk_sizing.max_position_notional` or `risk_sizing.target_weight`,
+the projection must emit `target_weight`, `max_position_notional`,
+`max_loss_notional`, and `weight_basis`. Backtests should consume
+`target_weight` first and only fall back to direction-only signals when sizing
+context is unavailable.
+
+For `trim`, `sell`, and `cover`, the projection must either use explicit
+`risk_sizing.target_weight` or compute the post-action target from current
+position value. It must not silently turn a partial trim or cover into a full
+flat target when current position value is unavailable.
 
 `trade_proposal.json` is a normalized order-intent proposal, not an order. It
 may contain one or more proposed orders, but by default the writer keeps:
@@ -232,7 +262,9 @@ The normal Agent flow is:
    are `ok`, blocker-free, and identity-matched.
 8. If the user asks for historical evaluation or backtesting, call
    `moirix_export_decision_projection`. The projection must remain research-only
-   and must not be treated as Moirix evidence or a broker order.
+   and must not be treated as Moirix evidence or a broker order. Serious
+   backtests should consume `target_weight` rather than assuming full-notional
+   long/short exposure.
 9. Use `moirix_authority_guard` for proposal checks.
 10. Only if the user has provided an explicit execution approval artifact, call
    `moirix_execute_trade_proposal`. In v1, live execution is blocked. Paper
@@ -254,6 +286,7 @@ The backtest projection layer answers:
 
 - how the research proposal is represented as dated, auditable rows;
 - which symbol/action/side/size the backtest may consume;
+- which target weight was derived from risk sizing and portfolio context;
 - which source decision hash and authority fields bound the projection.
 - which Vibe `SignalEngine` template can consume the projection in the normal
   backtest runner.
@@ -298,6 +331,8 @@ is exposed in the Moirix UI.
 ## Acceptance Criteria
 
 - Missing Moirix adapter returns `unavailable`, not a crash.
+- Adapter-backed calls write `adapter_call_status.json` with status, timeout,
+  blockers, command source, cwd, and fail-closed state.
 - Blocked source coverage does not create fake `news_evidence.jsonl`.
 - `moirix_write_event_thesis` refuses `strength`, `weight`, numeric
   `confidence`, and `impact_score`.
@@ -309,6 +344,9 @@ is exposed in the Moirix UI.
   default.
 - `moirix_export_decision_projection` writes research-only backtest projection
   artifacts and refuses broker-authorized proposals.
+- `moirix_export_decision_projection` emits `target_weight` when portfolio base
+  and risk sizing are available, and its signal-engine template consumes that
+  weight.
 - `moirix_execute_trade_proposal` blocks without an explicit approval artifact
   and blocks all live execution in v1.
 - All authority fields remain research-only and false for broker/real-money

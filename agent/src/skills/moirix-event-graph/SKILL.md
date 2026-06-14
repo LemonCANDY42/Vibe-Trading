@@ -54,7 +54,9 @@ produces the auditable thesis.
 7. If the user asks for historical evaluation or backtesting, call
    `moirix_export_decision_projection`. This writes research-only backtest
    projection artifacts and a Vibe signal-engine template; it is not Moirix
-   evidence and not an order.
+   evidence and not an order. When portfolio base and risk sizing exist, the
+   projection must use `target_weight`; direction-only output is only a degraded
+   fallback.
 8. If the user provides an explicit paper execution approval artifact, call
    `moirix_execute_trade_proposal`. Without approval it must return blocked.
    The approval must use schema `vibe.paper_execution_approval.v2` and bind the
@@ -106,7 +108,8 @@ vibe.moirix_position_decision.v1` and include:
   `watch`, `hedge`, or `blocked`;
 - rationale tied to the thesis and portfolio context;
 - execution window and invalidation triggers;
-- risk sizing: max position notional, max loss, and portfolio impact;
+- risk sizing: explicit target weight or max position notional, max loss, and
+  portfolio impact;
 - proposed orders only as normalized research intent;
 - authority fields with `research_only=true`,
   `paper_trade_proposal_allowed=false`, `broker_submit_allowed=false`, and
@@ -121,7 +124,12 @@ must reference the exact request hash and keep real-money authority false.
 
 `decision_projection.csv` and `decision_projection.json` are the only canonical
 backtest projection artifacts for this workflow. They are derived from
-`position_decision.json` and remain research-only.
+`position_decision.json` and remain research-only. Serious backtests should use
+`target_weight`, `max_position_notional`, `max_loss_notional`, and
+`weight_basis` from the projection rather than treating add/buy/short as
+full-notional direction signals. For `trim`, `sell`, and `cover`, use explicit
+target weight or current position value; do not infer a full flat target from a
+partial order when that context is missing.
 
 ## Safety
 
@@ -133,6 +141,9 @@ backtest projection artifacts for this workflow. They are derived from
 - Do not route news through market-data loaders.
 - Do not claim historical or real-time news coverage unless Moirix returns
   coverage evidence for the requested window.
+- Treat missing `adapter_call_status.json` on adapter-backed runs as an
+  observability gap; successful daily-operation runs should preserve adapter
+  timeout/status/blocker state.
 - Do not write outside the current run artifacts. Primary Moirix tool outputs
   belong under `artifacts/moirix/`; proposal authority checks belong under
   `artifacts/moirix/authority_checks/`.
