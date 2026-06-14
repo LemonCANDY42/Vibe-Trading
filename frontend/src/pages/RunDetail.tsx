@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   BarChart3,
   CheckCircle2,
+  Clock3,
   Code2,
   Database,
   Download,
@@ -31,7 +32,7 @@ import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 
 const rehypePlugins = [rehypeHighlight];
 
-type Tab = "chart" | "trades" | "runCard" | "code" | "validation" | "moirixEvidence" | "moirixThesis" | "moirixDecision" | "moirixPosition" | "moirixAuthority";
+type Tab = "chart" | "trades" | "runCard" | "code" | "validation" | "moirixEvidence" | "moirixMarket" | "moirixThesis" | "moirixDecision" | "moirixPosition" | "moirixAuthority";
 type ChartPayload = Pick<RunData, "price_series" | "indicator_series" | "trade_markers">;
 type ChartCache = Record<string, ChartPayload>;
 type ChartLoadProgress = { done: number; total: number };
@@ -46,6 +47,7 @@ function parseTab(value: string | null): Tab {
     case "code":
     case "validation":
     case "moirixEvidence":
+    case "moirixMarket":
     case "moirixThesis":
     case "moirixDecision":
     case "moirixPosition":
@@ -141,11 +143,12 @@ export function RunDetail() {
     { id: "trades", label: i18n.t("runDetail.trades"), icon: List },
     { id: "validation", label: i18n.t("runDetail.validation"), icon: ShieldCheck, hidden: !hasValidation },
     { id: "runCard", label: i18n.t("runDetail.runCard"), icon: FileCheck2, hidden: !hasRunCard },
-    { id: "moirixEvidence", label: "Moirix Evidence", icon: Database, hidden: !hasMoirix },
-    { id: "moirixThesis", label: "Event Thesis", icon: FileCheck2, hidden: !hasMoirix },
-    { id: "moirixDecision", label: "Decision Context", icon: Fingerprint, hidden: !hasMoirix },
-    { id: "moirixPosition", label: "Position Decision", icon: Gauge, hidden: !hasMoirix },
-    { id: "moirixAuthority", label: "Authority", icon: ShieldCheck, hidden: !hasMoirix },
+    { id: "moirixEvidence", label: i18n.t("moirix.evidenceTab"), icon: Database, hidden: !hasMoirix },
+    { id: "moirixMarket", label: i18n.t("moirix.marketContext"), icon: BarChart3, hidden: !hasMoirix },
+    { id: "moirixThesis", label: i18n.t("moirix.eventThesis"), icon: FileCheck2, hidden: !hasMoirix },
+    { id: "moirixDecision", label: i18n.t("moirix.decisionContext"), icon: Fingerprint, hidden: !hasMoirix },
+    { id: "moirixPosition", label: i18n.t("moirix.positionDecision"), icon: Gauge, hidden: !hasMoirix },
+    { id: "moirixAuthority", label: i18n.t("moirix.authority"), icon: ShieldCheck, hidden: !hasMoirix },
     { id: "code", label: i18n.t("runDetail.code"), icon: Code2 },
   ];
 
@@ -358,6 +361,7 @@ export function RunDetail() {
           {tab === "validation" && run.validation && <ValidationPanel data={run.validation} />}
           {tab === "runCard" && run.run_card && <RunCardTab card={run.run_card} />}
           {tab === "moirixEvidence" && <MoirixTab run={run} kind="evidence" />}
+          {tab === "moirixMarket" && <MoirixTab run={run} kind="market" />}
           {tab === "moirixThesis" && <MoirixTab run={run} kind="thesis" />}
           {tab === "moirixDecision" && <MoirixTab run={run} kind="decision" />}
           {tab === "moirixPosition" && <MoirixTab run={run} kind="position" />}
@@ -449,26 +453,63 @@ function LLMUsagePanel({ usage }: { usage: NonNullable<RunData["llm_usage"]> }) 
   );
 }
 
-function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "thesis" | "decision" | "position" | "authority" }) {
+function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "market" | "thesis" | "decision" | "position" | "authority" }) {
   const data = run.moirix_artifacts || {};
   const artifacts = (run.artifacts || []).filter((artifact) => artifact.name.startsWith("moirix/") || artifact.path.includes("/artifacts/moirix/"));
   if (Object.keys(data).length === 0 && artifacts.length === 0) {
-    return <div className="p-8 text-sm text-muted-foreground">No Moirix artifacts recorded.</div>;
+    return <div className="p-8 text-sm text-muted-foreground">{i18n.t("moirix.noArtifacts")}</div>;
   }
 
   if (kind === "evidence") {
     return (
       <div className="p-4 space-y-4">
         <div className="grid gap-4 xl:grid-cols-2">
-          <RunCardPanel title="Status" icon={Database}>
+          <RunCardPanel title={i18n.t("moirix.status")} icon={Database}>
             <JsonBlock value={data.status} />
           </RunCardPanel>
-          <RunCardPanel title="Coverage" icon={ShieldCheck}>
+          <RunCardPanel title={i18n.t("moirix.coverage")} icon={ShieldCheck}>
             <JsonBlock value={data.coverage_status} />
           </RunCardPanel>
         </div>
-        <RunCardPanel title="News Evidence Preview" icon={List}>
-          <PreviewTable value={data.news_evidence_preview} empty="No news evidence preview recorded." />
+        <RunCardPanel title={i18n.t("moirix.newsEvidencePreview")} icon={List}>
+          <PreviewTable value={data.news_evidence_preview} empty={i18n.t("moirix.noNewsEvidencePreview")} />
+        </RunCardPanel>
+      </div>
+    );
+  }
+
+  if (kind === "market") {
+    const context = recordOf(data.market_context);
+    const summary = recordOf(context?.series_summary);
+    const technical = recordOf(context?.technical_summary);
+    const eventWindow = recordOf(context?.event_window);
+    const source = recordOf(context?.source);
+    return (
+      <div className="p-4 space-y-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <RunCardStat label={i18n.t("moirix.contextStatus")} value={stringValue(context?.status) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.effectiveSource")} value={stringValue(source?.effective) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.totalReturn")} value={formatRunCardValue(summary?.total_return)} />
+          <RunCardStat label={i18n.t("moirix.trendState")} value={stringValue(technical?.trend_state) || i18n.t("moirix.notRecorded")} />
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <RunCardPanel title={i18n.t("moirix.seriesSummary")} icon={BarChart3}>
+            <KeyValueTable data={summary || {}} empty={i18n.t("moirix.noSeriesSummary")} />
+          </RunCardPanel>
+          <RunCardPanel title={i18n.t("moirix.technicalSummary")} icon={Gauge}>
+            <KeyValueTable data={technical || {}} empty={i18n.t("moirix.noTechnicalSummary")} />
+          </RunCardPanel>
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <RunCardPanel title={i18n.t("moirix.eventWindow")} icon={Clock3}>
+            <KeyValueTable data={eventWindow || {}} empty={i18n.t("moirix.noEventWindow")} />
+          </RunCardPanel>
+          <RunCardPanel title={i18n.t("moirix.benchmarkComparison")} icon={BarChart3}>
+            <JsonBlock value={context?.benchmark_comparison || context?.benchmark} />
+          </RunCardPanel>
+        </div>
+        <RunCardPanel title={i18n.t("moirix.rawMarketContext")} icon={Code2}>
+          <JsonBlock value={data.market_context} />
         </RunCardPanel>
       </div>
     );
@@ -481,30 +522,30 @@ function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "thesis" | 
     return (
       <div className="p-4 space-y-4">
         {typeof data.event_thesis_report_markdown === "string" && (
-          <RunCardPanel title="Event Thesis Report" icon={FileCheck2}>
+          <RunCardPanel title={i18n.t("moirix.eventThesisReport")} icon={FileCheck2}>
             <div className="prose prose-sm max-w-none dark:prose-invert">
               <ReactMarkdown rehypePlugins={rehypePlugins}>{data.event_thesis_report_markdown}</ReactMarkdown>
             </div>
           </RunCardPanel>
         )}
         <div className="grid gap-3 md:grid-cols-4">
-          <RunCardStat label="Stance" value={stringValue(current?.stance) || "not recorded"} />
-          <RunCardStat label="Actionability" value={stringValue(current?.actionability) || "not recorded"} />
-          <RunCardStat label="Window start" value={stringValue(window?.start) || "not recorded"} />
-          <RunCardStat label="Window end" value={stringValue(window?.end) || "not recorded"} />
+          <RunCardStat label={i18n.t("moirix.stance")} value={stringValue(current?.stance) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.actionability")} value={stringValue(current?.actionability) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.windowStart")} value={stringValue(window?.start) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.windowEnd")} value={stringValue(window?.end) || i18n.t("moirix.notRecorded")} />
         </div>
-        <RunCardPanel title="Current Thesis" icon={FileCheck2}>
-          <KeyValueTable data={current || {}} empty="No current thesis recorded." />
+        <RunCardPanel title={i18n.t("moirix.currentThesis")} icon={FileCheck2}>
+          <KeyValueTable data={current || {}} empty={i18n.t("moirix.noCurrentThesis")} />
         </RunCardPanel>
         <div className="grid gap-4 xl:grid-cols-2">
-          <RunCardPanel title="Evidence Items" icon={Database}>
-            <PreviewTable value={thesis?.evidence_items} empty="No thesis evidence items recorded." />
+          <RunCardPanel title={i18n.t("moirix.evidenceItems")} icon={Database}>
+            <PreviewTable value={thesis?.evidence_items} empty={i18n.t("moirix.noThesisEvidenceItems")} />
           </RunCardPanel>
-          <RunCardPanel title="Semantic Relations" icon={BarChart3}>
-            <PreviewTable value={thesis?.relations} empty="No semantic relations recorded." />
+          <RunCardPanel title={i18n.t("moirix.semanticRelations")} icon={BarChart3}>
+            <PreviewTable value={thesis?.relations} empty={i18n.t("moirix.noSemanticRelations")} />
           </RunCardPanel>
         </div>
-        <RunCardPanel title="Raw Event Thesis" icon={Code2}>
+        <RunCardPanel title={i18n.t("moirix.rawEventThesis")} icon={Code2}>
           <JsonBlock value={data.event_thesis_graph} />
         </RunCardPanel>
       </div>
@@ -517,23 +558,23 @@ function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "thesis" | 
     return (
       <div className="p-4 space-y-4">
         <div className="grid gap-3 md:grid-cols-4">
-          <RunCardStat label="Context status" value={stringValue(context?.status) || "not recorded"} />
-          <RunCardStat label="Positions" value={formatRunCardValue(counts?.positions ?? 0)} />
-          <RunCardStat label="Open orders" value={formatRunCardValue(counts?.open_orders ?? 0)} />
-          <RunCardStat label="Executions" value={formatRunCardValue(counts?.executions ?? 0)} />
+          <RunCardStat label={i18n.t("moirix.contextStatus")} value={stringValue(context?.status) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.positions")} value={formatRunCardValue(counts?.positions ?? 0)} />
+          <RunCardStat label={i18n.t("moirix.openOrders")} value={formatRunCardValue(counts?.open_orders ?? 0)} />
+          <RunCardStat label={i18n.t("moirix.executions")} value={formatRunCardValue(counts?.executions ?? 0)} />
         </div>
         <div className="grid gap-4 xl:grid-cols-2">
-          <RunCardPanel title="Account Summary" icon={Fingerprint}>
-            <KeyValueTable data={recordOf(context?.account_summary) || {}} empty="No account summary recorded." />
+          <RunCardPanel title={i18n.t("moirix.accountSummary")} icon={Fingerprint}>
+            <KeyValueTable data={recordOf(context?.account_summary) || {}} empty={i18n.t("moirix.noAccountSummary")} />
           </RunCardPanel>
-          <RunCardPanel title="Portfolio Source" icon={Database}>
-            <KeyValueTable data={recordOf(context?.portfolio_source) || {}} empty="No portfolio source recorded." />
+          <RunCardPanel title={i18n.t("moirix.portfolioSource")} icon={Database}>
+            <KeyValueTable data={recordOf(context?.portfolio_source) || {}} empty={i18n.t("moirix.noPortfolioSource")} />
           </RunCardPanel>
         </div>
-        <RunCardPanel title="Positions" icon={List}>
-          <PreviewTable value={context?.positions} empty="No positions recorded." />
+        <RunCardPanel title={i18n.t("moirix.positions")} icon={List}>
+          <PreviewTable value={context?.positions} empty={i18n.t("moirix.noPositions")} />
         </RunCardPanel>
-        <RunCardPanel title="Raw Decision Context" icon={Code2}>
+        <RunCardPanel title={i18n.t("moirix.rawDecisionContext")} icon={Code2}>
           <JsonBlock value={data.event_decision_context} />
         </RunCardPanel>
       </div>
@@ -550,38 +591,38 @@ function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "thesis" | 
     return (
       <div className="p-4 space-y-4">
         {typeof data.portfolio_adjustment_plan_markdown === "string" && (
-          <RunCardPanel title="Portfolio Adjustment Plan" icon={Gauge}>
+          <RunCardPanel title={i18n.t("moirix.portfolioAdjustmentPlan")} icon={Gauge}>
             <div className="prose prose-sm max-w-none dark:prose-invert">
               <ReactMarkdown rehypePlugins={rehypePlugins}>{data.portfolio_adjustment_plan_markdown}</ReactMarkdown>
             </div>
           </RunCardPanel>
         )}
         <div className="grid gap-3 md:grid-cols-4">
-          <RunCardStat label="Action" value={stringValue(position?.action) || "not recorded"} />
-          <RunCardStat label="Decision status" value={stringValue(position?.status) || "not recorded"} />
-          <RunCardStat label="Window start" value={stringValue(window?.start) || "not recorded"} />
-          <RunCardStat label="Execution status" value={stringValue(execution?.status) || "not recorded"} />
+          <RunCardStat label={i18n.t("moirix.action")} value={stringValue(position?.action) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.decisionStatus")} value={stringValue(position?.status) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.windowStart")} value={stringValue(window?.start) || i18n.t("moirix.notRecorded")} />
+          <RunCardStat label={i18n.t("moirix.executionStatus")} value={stringValue(execution?.status) || i18n.t("moirix.notRecorded")} />
         </div>
         <div className="grid gap-4 xl:grid-cols-2">
-          <RunCardPanel title="Risk Sizing" icon={Gauge}>
+          <RunCardPanel title={i18n.t("moirix.riskSizing")} icon={Gauge}>
             <JsonBlock value={risk || position?.risk_sizing} />
           </RunCardPanel>
-          <RunCardPanel title="Trade Proposal" icon={List}>
-            <PreviewTable value={proposal?.orders} empty="No proposed orders recorded." />
+          <RunCardPanel title={i18n.t("moirix.tradeProposal")} icon={List}>
+            <PreviewTable value={proposal?.orders} empty={i18n.t("moirix.noProposedOrders")} />
           </RunCardPanel>
         </div>
         <div className="grid gap-4 xl:grid-cols-2">
-          <RunCardPanel title="Backtest Projection" icon={BarChart3}>
-            <PreviewTable value={data.decision_projection_preview} empty="No decision projection recorded." />
+          <RunCardPanel title={i18n.t("moirix.backtestProjection")} icon={BarChart3}>
+            <PreviewTable value={data.decision_projection_preview} empty={i18n.t("moirix.noDecisionProjection")} />
           </RunCardPanel>
-          <RunCardPanel title="Projection Manifest" icon={FileCheck2}>
+          <RunCardPanel title={i18n.t("moirix.projectionManifest")} icon={FileCheck2}>
             <JsonBlock value={projectionManifest} />
           </RunCardPanel>
         </div>
-        <RunCardPanel title="Raw Position Decision" icon={Code2}>
+        <RunCardPanel title={i18n.t("moirix.rawPositionDecision")} icon={Code2}>
           <JsonBlock value={data.position_decision} />
         </RunCardPanel>
-        <RunCardPanel title="Execution Gate Status" icon={ShieldCheck}>
+        <RunCardPanel title={i18n.t("moirix.executionGateStatus")} icon={ShieldCheck}>
           <JsonBlock value={data.execution_status} />
         </RunCardPanel>
       </div>
@@ -591,14 +632,14 @@ function MoirixTab({ run, kind }: { run: RunData; kind: "evidence" | "thesis" | 
   return (
     <div className="p-4 space-y-4">
       <div className="grid gap-4 xl:grid-cols-2">
-        <RunCardPanel title="Authority Status" icon={ShieldCheck}>
+        <RunCardPanel title={i18n.t("moirix.authorityStatus")} icon={ShieldCheck}>
           <JsonBlock value={data.authority_status || data.moirix_authority_status} />
         </RunCardPanel>
-        <RunCardPanel title="Run Card Patch" icon={FileCheck2}>
+        <RunCardPanel title={i18n.t("moirix.runCardPatch")} icon={FileCheck2}>
           <JsonBlock value={data.vibe_run_card_patch} />
         </RunCardPanel>
       </div>
-      <RunCardPanel title="Authority Checks" icon={ShieldCheck}>
+      <RunCardPanel title={i18n.t("moirix.authorityChecks")} icon={ShieldCheck}>
         <JsonBlock value={data.authority_checks} />
       </RunCardPanel>
     </div>

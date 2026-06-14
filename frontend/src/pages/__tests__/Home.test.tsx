@@ -66,6 +66,11 @@ function makeMoirixDetail(overrides: Partial<RunData> = {}): RunData {
           actionability: "watch",
         },
       },
+      market_context: {
+        status: "ok",
+        source: { effective: "tushare" },
+        series_summary: { total_return: 0.042 },
+      },
       event_decision_context: {
         status: "ok",
         position_counts: { positions: 1, open_orders: 0, executions: 0 },
@@ -149,12 +154,14 @@ describe("Home workbench", () => {
     expect(screen.getAllByText("moirix_run")).toHaveLength(2);
     expect(screen.getByText("ordinary_run")).toBeInTheDocument();
     expect(screen.getByText("2 preview rows")).toBeInTheDocument();
+    expect(screen.getByText("tushare · +4.20%")).toBeInTheDocument();
     expect(screen.getByText("bullish · watch")).toBeInTheDocument();
     expect(screen.getByText("1 positions · 0 orders")).toBeInTheDocument();
     expect(screen.getByText("add · 1 proposed")).toBeInTheDocument();
     expect(screen.getByText(/real-money=false/)).toBeInTheDocument();
     expect(screen.getByText("Low-confidence evidence coverage.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Evidence" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixEvidence");
+    expect(screen.getByRole("link", { name: "Market Context" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixMarket");
     expect(screen.getByRole("link", { name: "Thesis" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixThesis");
     expect(screen.getByRole("link", { name: "Context" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixDecision");
     expect(screen.getByRole("link", { name: "Position" })).toHaveAttribute("href", "/runs/moirix_run?tab=moirixPosition");

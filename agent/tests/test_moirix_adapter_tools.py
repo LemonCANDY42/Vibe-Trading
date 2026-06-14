@@ -10,14 +10,18 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import src.tools as tools_pkg
 import src.tools._moirix_adapter as moirix_adapter
+import backtest.loaders.registry as loader_registry
+from backtest.loaders.registry import FALLBACK_CHAINS, LOADER_REGISTRY
 from src.tools import build_registry
 from src.tools.moirix_authority_guard_tool import MoirixAuthorityGuardTool
 from src.tools.moirix_decision_projection_tool import MoirixDecisionProjectionTool
 from src.tools.moirix_event_thesis_tool import MoirixEventThesisTool
+from src.tools.moirix_market_context_tool import MoirixMarketContextTool
 from src.tools.moirix_news_tool import MoirixNewsTool
 from src.tools.moirix_portfolio_context_tool import MoirixPortfolioContextTool
 from src.tools.moirix_position_decision_tool import MoirixPositionDecisionTool
@@ -325,6 +329,78 @@ def _write_query_news_artifacts(
     )
 
 
+class _UnavailableTushareMarketLoader:
+    name = "tushare"
+    markets = {"a_share"}
+    requires_auth = True
+
+    def is_available(self) -> bool:
+        return False
+
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+        return {}
+
+
+class _EmptyTushareMarketLoader:
+    name = "tushare"
+    markets = {"a_share"}
+    requires_auth = True
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+        return {}
+
+
+class _FutureLeakingMarketLoader:
+    name = "future_leak"
+    markets = {"a_share"}
+    requires_auth = False
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+        index = pd.date_range("2025-04-29", "2025-05-03", freq="D")
+        frame = pd.DataFrame(
+            {
+                "open": [10.0, 11.0, 12.0, 100.0, 120.0],
+                "high": [10.5, 11.5, 12.5, 101.0, 121.0],
+                "low": [9.5, 10.5, 11.5, 99.0, 119.0],
+                "close": [10.0, 11.0, 12.0, 100.0, 120.0],
+                "volume": [1000, 1100, 1200, 9999, 9999],
+            },
+            index=index,
+        )
+        frame.index.name = "trade_date"
+        return {codes[0]: frame}
+
+
+class _FakeBaostockMarketLoader:
+    name = "baostock"
+    markets = {"a_share"}
+    requires_auth = False
+
+    def is_available(self) -> bool:
+        return True
+
+    def fetch(self, codes, start_date, end_date, *, interval="1D", fields=None):
+        index = pd.date_range("2025-04-21", "2025-05-01", freq="D")
+        frame = pd.DataFrame(
+            {
+                "open": [10.0 + i for i in range(len(index))],
+                "high": [10.5 + i for i in range(len(index))],
+                "low": [9.5 + i for i in range(len(index))],
+                "close": [10.0 + i for i in range(len(index))],
+                "volume": [1000 + (i * 10) for i in range(len(index))],
+            },
+            index=index,
+        )
+        frame.index.name = "trade_date"
+        return {codes[0]: frame}
+
+
 def _write_execution_approval(
     path: Path,
     *,
@@ -377,6 +453,7 @@ def test_moirix_tools_are_discoverable(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert "moirix_status" in registry.tool_names
     assert "moirix_query_news" in registry.tool_names
+    assert "moirix_market_context" in registry.tool_names
     assert "moirix_write_event_thesis" in registry.tool_names
     assert "moirix_portfolio_context" in registry.tool_names
     assert "moirix_write_position_decision" in registry.tool_names
@@ -430,6 +507,123 @@ def test_query_news_preserves_blocked_and_writes_no_fake_evidence(
     assert adapter_status["status"] == "blocked"
     assert adapter_status["fail_closed"] is True
     assert "fixture_source_lake_blocked" in adapter_status["blockers"]
+
+
+def test_market_context_writes_vibe_loader_source_provenance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr(tools_pkg, "_SUBCLASSES_CACHE", None)
+    monkeypatch.setattr(loader_registry, "_ensure_registered", lambda: None)
+    monkeypatch.setitem(LOADER_REGISTRY, "tushare", _UnavailableTushareMarketLoader)
+    monkeypatch.setitem(LOADER_REGISTRY, "baostock", _FakeBaostockMarketLoader)
+    monkeypatch.setitem(FALLBACK_CHAINS, "a_share", ["tushare", "baostock"])
+
+    payload = json.loads(
+        MoirixMarketContextTool().execute(
+            run_dir=str(run_dir),
+            target="000001.SZ",
+            market="A-share",
+            as_of="2025-05-01",
+            lookback_days=10,
+            source="auto",
+        )
+    )
+
+    out = run_dir / "artifacts" / "moirix"
+    assert payload["status"] == "ok"
+    assert payload["source"]["requested"] == "auto"
+    assert payload["source"]["detected"] == "tushare"
+    assert payload["source"]["effective"] == "baostock"
+    assert payload["source"]["fallback_used"] is True
+    assert payload["market_context"]["retrospective_validation"] is False
+    assert payload["market_context"]["end_date"] == "2025-05-01"
+    assert payload["series_summary"]["bars"] > 0
+    assert payload["technical_summary"]["trend_state"] in {"uptrend", "above_sma20", "unknown"}
+    assert payload["authority"]["broker_submit_allowed"] is False
+    persisted = json.loads((out / "market_context.json").read_text(encoding="utf-8"))
+    assert persisted["usage"].startswith("Vibe loader-backed market context only")
+
+
+def test_market_context_runtime_fallback_when_primary_returns_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr(loader_registry, "_ensure_registered", lambda: None)
+    monkeypatch.setitem(LOADER_REGISTRY, "tushare", _EmptyTushareMarketLoader)
+    monkeypatch.setitem(LOADER_REGISTRY, "baostock", _FakeBaostockMarketLoader)
+    monkeypatch.setitem(FALLBACK_CHAINS, "a_share", ["tushare", "baostock"])
+
+    payload = json.loads(
+        MoirixMarketContextTool().execute(
+            run_dir=str(run_dir),
+            target="000001.SZ",
+            market="A-share",
+            as_of="2025-05-01",
+            lookback_days=10,
+            source="auto",
+        )
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["source"]["detected"] == "tushare"
+    assert payload["source"]["effective"] == "baostock"
+    assert payload["source"]["fallback_used"] is True
+
+
+def test_market_context_clips_loader_rows_after_as_of_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr(loader_registry, "_ensure_registered", lambda: None)
+    monkeypatch.setitem(LOADER_REGISTRY, "future_leak", _FutureLeakingMarketLoader)
+
+    payload = json.loads(
+        MoirixMarketContextTool().execute(
+            run_dir=str(run_dir),
+            target="000001.SZ",
+            market="A-share",
+            as_of="2025-05-01",
+            lookback_days=10,
+            source="future_leak",
+        )
+    )
+
+    assert payload["status"] == "ok"
+    assert payload["series_summary"]["last_date"] == "2025-05-01"
+    assert payload["series_summary"]["last_close"] == 12.0
+    assert payload["series_summary"]["bars"] == 3
+    assert payload["market_context"]["end_date"] == "2025-05-01"
+    assert payload["market_context"]["retrospective_validation"] is False
+
+
+def test_market_context_blocks_without_fabricating_market_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _run_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr(loader_registry, "_ensure_registered", lambda: None)
+    monkeypatch.setitem(LOADER_REGISTRY, "tushare", _UnavailableTushareMarketLoader)
+    monkeypatch.setitem(FALLBACK_CHAINS, "a_share", ["tushare"])
+
+    payload = json.loads(
+        MoirixMarketContextTool().execute(
+            run_dir=str(run_dir),
+            target="000001.SZ",
+            market="A-share",
+            as_of="2025-05-01",
+            lookback_days=10,
+            source="auto",
+        )
+    )
+
+    assert payload["status"] == "blocked"
+    assert "moirix_market_context_price_unavailable" in payload["claim_gate"]["blockers"]
+    assert "series_summary" not in payload
+    assert (run_dir / "artifacts" / "moirix" / "market_context.json").exists()
 
 
 def test_adapter_call_status_records_timeout_fail_closed(

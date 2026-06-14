@@ -7,6 +7,7 @@ numeric event-impact graph or event_signal backtest path. It is:
 ```text
 moirix_status
   -> moirix_query_news
+  -> moirix_market_context when market, benchmark, or technical context matters
   -> moirix_portfolio_context
   -> moirix_write_event_thesis
   -> moirix_write_position_decision when a thesis should become a portfolio proposal
@@ -54,6 +55,9 @@ need deterministic artifacts:
   commands all fail closed and preserve their blockers;
 - decision projection uses portfolio-aware `target_weight` when a portfolio
   base and risk sizing are available;
+- market context is Vibe-side loader context, not Moirix source-lake evidence;
+  it records requested/effective data sources, price-window behavior, benchmark
+  comparison, and technical summaries under the run directory;
 - direction-only projection is a degraded fallback, not the preferred serious
   backtest mode;
 - paper execution uses approval/request hashes and audit-ledger idempotency;
@@ -66,6 +70,8 @@ Vibe owns:
 
 - Agent synthesis and thesis artifacts;
 - run artifact writes under `artifacts/moirix/`;
+- Vibe loader-backed market context for technical, benchmark, and price-window
+  evidence;
 - skill and swarm workflow routing;
 - Home and Run Detail UI for evidence, thesis, decision context, and authority;
 - fail-closed presentation when evidence or portfolio context is unavailable.
@@ -75,6 +81,11 @@ Moirix owns:
 - PIT source-lake evidence retrieval;
 - source coverage and blocker claims;
 - no-fake-evidence behavior for blocked/unavailable queries.
+
+Moirix does not own Vibe market loaders. `tushare`, `mootdx`, `baostock`,
+`tencent`, `akshare`, `yfinance`, and other loaders may supplement a thesis with
+market context, but they must not be written into Moirix source-lake state or
+presented as PIT news evidence.
 
 Vibe must not write Moirix source-lake, graph-truth, portfolio, ledger, broker,
 or audit state. Vibe must not route news through market-data loaders. Vibe may
@@ -97,6 +108,7 @@ artifacts/moirix/
   coverage_status.json
   adapter_call_status.json
   news_evidence.jsonl
+  market_context.json
   event_thesis_graph.json
   event_thesis_report.md
   event_decision_context.json
@@ -125,6 +137,21 @@ artifacts/moirix/
 - `causal_chain`
 
 It must not use `strength`, `weight`, numeric `confidence`, or `impact_score`.
+
+`market_context.json` uses schema `vibe.moirix_market_context.v1`. It is a
+Vibe-side context artifact with these rules:
+
+- A-share source selection should use `auto` by default, which preserves the
+  loader preference `tushare -> mootdx -> baostock -> tencent -> akshare`.
+- The artifact records both requested and effective source names so free
+  fallback usage is auditable.
+- It may include lookback return, volatility, volume, moving-average, benchmark,
+  and event-window price summaries.
+- It is not Moirix evidence, not a source-lake coverage claim, and not a broker
+  order.
+- By default it does not fetch after `as_of`; post-`as_of` windows are allowed
+  only through an explicit retrospective-validation option and must be labeled as
+  such to avoid future leakage in daily decision runs.
 
 Authority must remain fail-closed:
 
@@ -216,6 +243,7 @@ Canonical tools:
 
 - `moirix_status`
 - `moirix_query_news`
+- `moirix_market_context`
 - `moirix_portfolio_context`
 - `moirix_write_event_thesis`
 - `moirix_write_position_decision`
@@ -240,33 +268,37 @@ The normal Agent flow is:
    analysis.
 2. Call `moirix_status`.
 3. Call `moirix_query_news`.
-4. Call `moirix_portfolio_context` when holdings, cash, open orders, or IBKR
+4. Call `moirix_market_context` when price behavior, technical state, loader
+   source provenance, or benchmark comparison matters. For A-shares, prefer
+   `source="auto"` so Tushare is first and free loaders remain fallback.
+5. Call `moirix_portfolio_context` when holdings, cash, open orders, or IBKR
    paper context matter. Missing context is `blocked` or `unavailable`, not fake
    positions.
-5. Synthesize a thesis with:
+6. Synthesize a thesis with:
    - evidence item truth status;
    - source quality;
    - semantic event-to-event relations;
    - target/sector/supply-chain impact path;
+   - market context from `market_context.json` when available;
    - current stance and actionability;
    - execution window;
    - open questions and invalidation triggers;
    - authority fields.
-6. Call `moirix_write_event_thesis`.
+7. Call `moirix_write_event_thesis`.
    The write is accepted only when the thesis references event IDs present in
    the same run's nonblocked `query-news` PIT evidence and no referenced
    evidence has `visible_at` after `as_of`.
-7. If the user asks for a current-position or new-target decision, synthesize a
+8. If the user asks for a current-position or new-target decision, synthesize a
    position decision and call `moirix_write_position_decision`.
    The write is accepted only when the thesis and portfolio context artifacts
    are `ok`, blocker-free, and identity-matched.
-8. If the user asks for historical evaluation or backtesting, call
+9. If the user asks for historical evaluation or backtesting, call
    `moirix_export_decision_projection`. The projection must remain research-only
    and must not be treated as Moirix evidence or a broker order. Serious
    backtests should consume `target_weight` rather than assuming full-notional
    long/short exposure.
-9. Use `moirix_authority_guard` for proposal checks.
-10. Only if the user has provided an explicit execution approval artifact, call
+10. Use `moirix_authority_guard` for proposal checks.
+11. Only if the user has provided an explicit execution approval artifact, call
    `moirix_execute_trade_proposal`. In v1, live execution is blocked. Paper
    execution is allowed only when the proposal hash, approval authority,
    selected connector, and trading service all pass their own gates.
@@ -331,6 +363,11 @@ is exposed in the Moirix UI.
 ## Acceptance Criteria
 
 - Missing Moirix adapter returns `unavailable`, not a crash.
+- `moirix_market_context` writes run-scoped Vibe market context with requested
+  and effective loader source provenance, and it does not write Moirix
+  source-lake state.
+- `moirix_market_context` does not include post-`as_of` price bars unless
+  explicitly requested for retrospective validation.
 - Adapter-backed calls write `adapter_call_status.json` with status, timeout,
   blockers, command source, cwd, and fail-closed state.
 - Blocked source coverage does not create fake `news_evidence.jsonl`.

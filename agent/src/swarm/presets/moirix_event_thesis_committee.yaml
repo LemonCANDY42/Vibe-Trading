@@ -55,6 +55,25 @@ agents:
     timeout_seconds: 900
     max_retries: 1
 
+  - id: market_context_analyst
+    role: Market Context Analyst
+    system_prompt: |
+      You attach Vibe loader-backed market context to the Moirix thesis.
+
+      {upstream_context}
+
+      Task:
+      - Call moirix_market_context for {target}, {market}, and {as_of}.
+      - Use source="auto" unless the user explicitly requested a source.
+      - For A-shares, preserve Tushare as the preferred source and free loaders as fallback.
+      - Treat market_context.json as Vibe market context, not Moirix source-lake evidence.
+      - Do not request post-as_of bars unless the user explicitly asks for retrospective validation.
+    tools: [read_file, write_file, load_skill, moirix_market_context]
+    skills: [moirix-event-graph, technical-basic, risk-analysis]
+    max_iterations: 20
+    timeout_seconds: 900
+    max_retries: 1
+
   - id: target_impact_analyst
     role: Target Impact Analyst
     system_prompt: |
@@ -166,14 +185,22 @@ tasks:
     input_from:
       evidence: task-evidence
 
+  - id: task-market-context
+    agent_id: market_context_analyst
+    prompt_template: "Attach Vibe loader-backed market context for {target} in {market} as of {as_of}. Record requested/effective source provenance and avoid post-as_of data unless retrospective validation was explicitly requested."
+    depends_on: [task-evidence]
+    input_from:
+      evidence: task-evidence
+
   - id: task-target-impact
     agent_id: target_impact_analyst
-    prompt_template: "Analyze target-level impact paths for {target}: revenue, margin, valuation, liquidity, sentiment, supply-chain, policy, and horizon."
-    depends_on: [task-contradictions, task-sector]
+    prompt_template: "Analyze target-level impact paths for {target}: revenue, margin, valuation, liquidity, sentiment, supply-chain, policy, and horizon. Use market_context.json when available, but do not treat it as Moirix news evidence."
+    depends_on: [task-contradictions, task-sector, task-market-context]
     input_from:
       evidence: task-evidence
       relations: task-contradictions
       sector_paths: task-sector
+      market_context: task-market-context
 
   - id: task-portfolio
     agent_id: portfolio_context_analyst
@@ -184,29 +211,32 @@ tasks:
 
   - id: task-debate
     agent_id: bull_bear_researchers
-    prompt_template: "Build balanced bull and bear arguments for {target} using evidence, semantic relations, target impact, and portfolio context."
-    depends_on: [task-target-impact, task-portfolio]
+    prompt_template: "Build balanced bull and bear arguments for {target} using evidence, semantic relations, market context, target impact, and portfolio context."
+    depends_on: [task-target-impact, task-market-context, task-portfolio]
     input_from:
+      market_context: task-market-context
       target_impact: task-target-impact
       portfolio_context: task-portfolio
 
   - id: task-risk
     agent_id: risk_reviewer
     prompt_template: "Review actionability, risk, invalidation triggers, authority boundaries, and future-leakage risks for {target}."
-    depends_on: [task-debate]
+    depends_on: [task-debate, task-evidence, task-market-context, task-portfolio]
     input_from:
       debate: task-debate
       evidence: task-evidence
+      market_context: task-market-context
       portfolio_context: task-portfolio
 
   - id: task-synthesis
     agent_id: decision_synthesizer
     prompt_template: "Synthesize and persist the canonical Moirix event thesis artifacts for {target}. Use event_thesis_graph.json, event_thesis_report.md, and event_decision_context.json as the canonical workflow output."
-    depends_on: [task-risk]
+    depends_on: [task-risk, task-evidence, task-contradictions, task-sector, task-market-context, task-target-impact, task-portfolio, task-debate]
     input_from:
       evidence: task-evidence
       relations: task-contradictions
       sector_paths: task-sector
+      market_context: task-market-context
       target_impact: task-target-impact
       portfolio_context: task-portfolio
       debate: task-debate

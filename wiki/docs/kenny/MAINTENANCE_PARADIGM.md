@@ -78,6 +78,31 @@ in the same change set.
 
 ## Standard Workflow
 
+### Maintainer Feedback Pattern
+
+Recent upstream maintainer feedback should be treated as a reusable development
+standard for this fork and for future project work:
+
+- discuss small contracts before broad implementation when a change touches core
+  run APIs, AgentLoop behavior, broker surfaces, or shared frontend routes;
+- preserve default behavior for existing consumers; use explicit opt-in query
+  params, tools, artifacts, or feature surfaces for new behavior;
+- keep artifacts run-scoped unless a project contract explicitly requires a
+  global store;
+- keep diffs minimal and self-contained; do not combine dashboard, broker,
+  usage, reports, Moirix, and performance changes in one upstream-facing PR;
+- expose only provider-reported or source-reported facts in audit artifacts; do
+  not infer hidden usage, prices, credentials, or unavailable data;
+- keep frontend strings in the project i18n layer with English and Chinese
+  parity;
+- use signed commits for upstream-facing community work and keep metadata clean:
+  DCO `Signed-off-by:` only, no AI attribution trailers.
+
+For Kenny-only work, apply the same engineering discipline even when the code is
+not intended upstream: bounded contract, run-scoped artifacts, fail-closed
+states, i18n parity for frontend changes, and targeted tests that prove the
+production path.
+
 ### 1. Define The Bounded Target
 
 Before implementation, state:
@@ -126,6 +151,7 @@ The canonical Moirix workflow is:
 ```text
 moirix_status
   -> moirix_query_news
+  -> moirix_market_context when market/technical/benchmark context matters
   -> moirix_portfolio_context
   -> moirix_write_event_thesis
   -> moirix_write_position_decision when a thesis becomes a proposal
@@ -148,6 +174,7 @@ The canonical artifacts are:
 ```text
 artifacts/moirix/news_evidence.jsonl
 artifacts/moirix/adapter_call_status.json
+artifacts/moirix/market_context.json
 artifacts/moirix/event_thesis_graph.json
 artifacts/moirix/event_thesis_report.md
 artifacts/moirix/event_decision_context.json

@@ -1193,6 +1193,7 @@ def _load_moirix_artifact_previews(run_dir: Path) -> Optional[Dict[str, Any]]:
         "status": "status.json",
         "request": "request.json",
         "coverage_status": "coverage_status.json",
+        "market_context": "market_context.json",
         "event_thesis_graph": "event_thesis_graph.json",
         "event_decision_context": "event_decision_context.json",
         "position_decision": "position_decision.json",

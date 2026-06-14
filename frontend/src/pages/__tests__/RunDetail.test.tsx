@@ -105,6 +105,31 @@ describe("RunDetail chart loading", () => {
           evidence_items: [{ event_id: "event:1", truth_status: "likely", summary: "Fixture event" }],
           relations: [{ source_event_id: "event:1", relation_type: "confirms", target_event_id: "event:1", explanation: "Fixture" }],
         },
+        market_context: {
+          status: "ok",
+          source: { requested: "auto", detected: "tushare", effective: "baostock", fallback_used: true },
+          series_summary: {
+            first_date: "2025-04-21",
+            last_date: "2025-05-01",
+            bars: 8,
+            total_return: 0.08,
+          },
+          technical_summary: {
+            trend_state: "uptrend",
+            sma_20: 120,
+          },
+          event_window: {
+            as_of: "2025-05-01",
+            pre_window_return: 0.02,
+            post_window_return: null,
+            retrospective_validation: false,
+          },
+          benchmark_comparison: {
+            target_total_return: 0.08,
+            benchmark_total_return: 0.03,
+            excess_return: 0.05,
+          },
+        },
         event_thesis_report_markdown: "# Event Thesis\n\nWatch only.",
         event_decision_context: {
           status: "ok",
@@ -148,6 +173,11 @@ describe("RunDetail chart loading", () => {
     expect(await screen.findByText("Event Thesis Report")).toBeInTheDocument();
     expect(screen.getAllByText("bullish").length).toBeGreaterThan(0);
     expect(screen.getAllByText("watch").length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole("button", { name: /Market Context/i }));
+    expect(await screen.findByText("Series Summary")).toBeInTheDocument();
+    expect(screen.getByText("baostock")).toBeInTheDocument();
+    expect(screen.getAllByText("uptrend").length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /Decision Context/i }));
     expect(await screen.findByText("Account Summary")).toBeInTheDocument();

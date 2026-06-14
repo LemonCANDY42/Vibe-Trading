@@ -9,7 +9,7 @@ agents:
       You review the canonical Moirix event thesis and portfolio context.
 
       Task:
-      - Read event_thesis_graph.json, event_thesis_report.md, and event_decision_context.json.
+      - Read event_thesis_graph.json, event_thesis_report.md, market_context.json when present, and event_decision_context.json.
       - Identify the thesis stance, actionability, invalidation triggers, open questions, and evidence gaps.
       - Preserve blocked/unavailable states. Do not invent evidence or holdings.
     tools: [read_file, load_skill]
@@ -44,6 +44,7 @@ agents:
 
       Task:
       - Propose max position notional, max loss notional, stop reference, and portfolio impact.
+      - Use market_context.json for volatility, trend state, benchmark comparison, and event-window behavior when present.
       - Keep sizing conservative when thesis actionability is watch, uncertain, or blocked.
       - Do not use numeric confidence, strength, weight, or impact_score.
       - Do not authorize broker submit.

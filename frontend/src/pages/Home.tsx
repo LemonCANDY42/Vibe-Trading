@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { api, type RunData, type RunListItem } from "@/lib/api";
 import { formatMetricVal } from "@/lib/formatters";
+import i18n from "@/i18n";
 import { isReportWorthyRun } from "@/lib/runReports";
 import { cn } from "@/lib/utils";
 
@@ -286,30 +287,30 @@ function MoirixResearchSection({ runs, loading, error }: MoirixResearchSectionPr
         <div>
           <div className="inline-flex items-center gap-2 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
             <Database className="h-3.5 w-3.5" />
-            Kenny fork
+            {i18n.t("moirix.kennyFork")}
           </div>
-          <h2 className="mt-3 text-lg font-semibold">Moirix Event Thesis</h2>
+          <h2 className="mt-3 text-lg font-semibold">{i18n.t("moirix.eventThesisTitle")}</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Recent PIT evidence, Agent-synthesized event theses, portfolio decision context, and authority artifacts from optional local Moirix runs.
+            {i18n.t("moirix.eventThesisDesc")}
           </p>
         </div>
         {loading && (
           <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Loading
+            {i18n.t("moirix.loading")}
           </span>
         )}
       </div>
 
       {error ? (
         <div className="mt-4 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-muted-foreground">
-          Moirix dashboard unavailable: {error}
+          {i18n.t("moirix.dashboardUnavailable", { error })}
         </div>
       ) : null}
 
       {!loading && !error && runs.length === 0 ? (
         <div className="mt-4 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          No Moirix event thesis or position decision artifacts found in recent runs. Ordinary Vibe workflows are unaffected.
+          {i18n.t("moirix.empty")}
         </div>
       ) : null}
 
@@ -331,6 +332,7 @@ interface MoirixRunSummary {
   status: string;
   statusTone: PillTone;
   evidence: string;
+  market: string;
   thesis: string;
   decision: string;
   position: string;
@@ -362,32 +364,36 @@ function MoirixRunCard({ run }: { run: MoirixRunSummary }) {
         </div>
         <div className="flex flex-wrap gap-2 lg:justify-end">
           <Link to={`/runs/${run.runId}?tab=moirixEvidence`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
-            Evidence
+            {i18n.t("moirix.evidence")}
+          </Link>
+          <Link to={`/runs/${run.runId}?tab=moirixMarket`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
+            {i18n.t("moirix.marketContext")}
           </Link>
           <Link to={`/runs/${run.runId}?tab=moirixThesis`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
-            Thesis
+            {i18n.t("moirix.thesis")}
           </Link>
           <Link to={`/runs/${run.runId}?tab=moirixDecision`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
-            Context
+            {i18n.t("moirix.context")}
           </Link>
           <Link to={`/runs/${run.runId}?tab=moirixPosition`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
-            Position
+            {i18n.t("moirix.position")}
           </Link>
           <Link to={`/runs/${run.runId}?tab=moirixAuthority`} className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted">
-            Authority
+            {i18n.t("moirix.authority")}
           </Link>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-        <MoirixStatusTile icon={Database} label="Evidence" value={run.evidence} />
-        <MoirixStatusTile icon={FileCheck2} label="Thesis" value={run.thesis} />
-        <MoirixStatusTile icon={BarChart3} label="Decision Context" value={run.decision} />
-        <MoirixStatusTile icon={Gauge} label="Position Decision" value={run.position} />
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <MoirixStatusTile icon={Database} label={i18n.t("moirix.evidence")} value={run.evidence} />
+        <MoirixStatusTile icon={BarChart3} label={i18n.t("moirix.marketContext")} value={run.market} />
+        <MoirixStatusTile icon={FileCheck2} label={i18n.t("moirix.thesis")} value={run.thesis} />
+        <MoirixStatusTile icon={BarChart3} label={i18n.t("moirix.decisionContext")} value={run.decision} />
+        <MoirixStatusTile icon={Gauge} label={i18n.t("moirix.positionDecision")} value={run.position} />
         <MoirixStatusTile
           icon={ShieldCheck}
-          label="Authority"
-          value={run.authorityFalse ? `${run.authority} · real-money=false` : run.authority}
+          label={i18n.t("moirix.authority")}
+          value={run.authorityFalse ? `${run.authority} · ${i18n.t("moirix.realMoneyFalse")}` : run.authority}
         />
       </div>
     </article>
@@ -464,6 +470,7 @@ function toMoirixRunSummary(run: RunListItem, detail: RunData): MoirixRunSummary
   const statusTone = toneForStatus(status);
   const coverage = asRecord(artifacts?.coverage_status);
   const thesis = asRecord(artifacts?.event_thesis_graph);
+  const marketContext = asRecord(artifacts?.market_context);
   const decisionContext = asRecord(artifacts?.event_decision_context);
   const positionDecision = asRecord(artifacts?.position_decision);
   const tradeProposal = asRecord(artifacts?.trade_proposal);
@@ -489,6 +496,7 @@ function toMoirixRunSummary(run: RunListItem, detail: RunData): MoirixRunSummary
     status,
     statusTone,
     evidence: summarizeEvidence(artifacts, coverage),
+    market: summarizeMarketContext(marketContext),
     thesis: summarizeThesis(thesis),
     decision: summarizeDecisionContext(decisionContext),
     position: summarizePositionDecision(positionDecision, tradeProposal, executionStatus),
@@ -505,10 +513,22 @@ function hasMoirixArtifacts(run: RunData): boolean {
 
 function summarizeEvidence(artifacts: Record<string, unknown> | null, coverage: Record<string, unknown> | null): string {
   const rows = countRows(artifacts?.news_evidence_preview);
-  if (rows > 0) return `${rows} preview rows`;
+  if (rows > 0) return i18n.t("moirix.previewRows", { count: rows });
   const coverageStatus = statusLabel(coverage);
   if (coverageStatus) return coverageStatus;
-  return artifacts?.news_evidence_preview ? "preview available" : "not recorded";
+  return artifacts?.news_evidence_preview ? i18n.t("moirix.previewAvailable") : i18n.t("moirix.notRecorded");
+}
+
+function summarizeMarketContext(context: Record<string, unknown> | null): string {
+  const status = statusLabel(context);
+  if (status && !["ok", "partial"].includes(status.toLowerCase())) return status;
+  const source = asRecord(context?.source);
+  const effective = firstString(source, ["effective"]);
+  const summary = asRecord(context?.series_summary);
+  const totalReturn = typeof summary?.total_return === "number" ? formatMetricVal("total_return", summary.total_return) : "";
+  if (effective && totalReturn) return `${effective} · ${totalReturn}`;
+  if (effective) return effective;
+  return status || (context ? i18n.t("moirix.contextRecorded") : i18n.t("moirix.notRecorded"));
 }
 
 function summarizeThesis(thesis: Record<string, unknown> | null): string {
@@ -517,8 +537,8 @@ function summarizeThesis(thesis: Record<string, unknown> | null): string {
   const actionability = firstString(current, ["actionability"]);
   if (stance && actionability) return `${stance} · ${actionability}`;
   if (stance || actionability) return stance || actionability;
-  if (thesis) return "thesis recorded";
-  return "not recorded";
+  if (thesis) return i18n.t("moirix.thesisRecorded");
+  return i18n.t("moirix.notRecorded");
 }
 
 function summarizeDecisionContext(context: Record<string, unknown> | null): string {
@@ -533,10 +553,13 @@ function summarizeDecisionContext(context: Record<string, unknown> | null): stri
     const positions = Number(counts.positions ?? 0);
     const orders = Number(counts.open_orders ?? 0);
     if (Number.isFinite(positions) || Number.isFinite(orders)) {
-      return `${Number.isFinite(positions) ? positions : 0} positions · ${Number.isFinite(orders) ? orders : 0} orders`;
+      return i18n.t("moirix.positionsOrders", {
+        positions: Number.isFinite(positions) ? positions : 0,
+        orders: Number.isFinite(orders) ? orders : 0,
+      });
     }
   }
-  return status || (context ? "context recorded" : "not recorded");
+  return status || (context ? i18n.t("moirix.contextRecorded") : i18n.t("moirix.notRecorded"));
 }
 
 function summarizePositionDecision(
@@ -548,9 +571,9 @@ function summarizePositionDecision(
   const status = statusLabel(decision);
   const orders = Array.isArray(proposal?.orders) ? proposal.orders.length : 0;
   const executionStatus = statusLabel(execution);
-  if (action && orders > 0) return `${action} · ${orders} proposed`;
+  if (action && orders > 0) return i18n.t("moirix.actionProposed", { action, count: orders });
   if (action) return executionStatus ? `${action} · ${executionStatus}` : action;
-  return status || (decision ? "decision recorded" : "not recorded");
+  return status || (decision ? i18n.t("moirix.decisionRecorded") : i18n.t("moirix.notRecorded"));
 }
 
 function inferMoirixStatus(run: RunData): string {

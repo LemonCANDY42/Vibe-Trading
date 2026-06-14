@@ -29,14 +29,19 @@ produces the auditable thesis.
    readiness, supported scopes, and fail-closed authority fields.
 2. Call `moirix_query_news` with `target`, `market`, `as_of`, and
    `lookback_days` to request PIT-valid evidence from Moirix.
-3. If current holdings, cash, open orders, or paper account state matter, call
+3. If market price behavior, technical state, benchmark comparison, or loader
+   source provenance matters, call `moirix_market_context` with `source="auto"`.
+   For A-shares, `auto` keeps Tushare first and uses free loaders such as
+   `mootdx`, `baostock`, `tencent`, and `akshare` only as fallbacks. This writes
+   `market_context.json`; it is Vibe market context, not Moirix news evidence.
+4. If current holdings, cash, open orders, or paper account state matter, call
    `moirix_portfolio_context` after a read-only portfolio snapshot or
    `ibkr_paper_readiness` artifact exists. Missing portfolio context must remain
    `blocked` or `unavailable`; do not invent positions.
-4. Synthesize the event thesis as structured JSON with semantic relations:
+5. Synthesize the event thesis as structured JSON with semantic relations:
    `supports`, `contradicts`, `supersedes`, `updates`, `duplicates`,
    `weakens`, `confirms`, or `causal_chain`.
-5. Call `moirix_write_event_thesis` to persist:
+6. Call `moirix_write_event_thesis` to persist:
    - `event_thesis_graph.json`;
    - `event_thesis_report.md`;
    - `authority_status.json`;
@@ -44,28 +49,28 @@ produces the auditable thesis.
    This write must fail closed unless the same run has nonblocked
    `query-news` evidence with matching `target`, `market`, `as_of`, referenced
    event IDs, and `visible_at <= as_of`.
-6. When the user asks for a position decision or new-target action proposal,
+7. When the user asks for a position decision or new-target action proposal,
    synthesize `vibe.moirix_position_decision.v1` and call
    `moirix_write_position_decision` to persist:
    - `position_decision.json`;
    - `trade_proposal.json`;
    - `risk_sizing_report.json`;
    - `portfolio_adjustment_plan.md`.
-7. If the user asks for historical evaluation or backtesting, call
+8. If the user asks for historical evaluation or backtesting, call
    `moirix_export_decision_projection`. This writes research-only backtest
    projection artifacts and a Vibe signal-engine template; it is not Moirix
    evidence and not an order. When portfolio base and risk sizing exist, the
    projection must use `target_weight`; direction-only output is only a degraded
    fallback.
-8. If the user provides an explicit paper execution approval artifact, call
+9. If the user provides an explicit paper execution approval artifact, call
    `moirix_execute_trade_proposal`. Without approval it must return blocked.
    The approval must use schema `vibe.paper_execution_approval.v2` and bind the
    request hash, connector, account, expiry, and max notional. Live execution is
    blocked in v1.
-9. If checking a proposal, call `moirix_authority_guard`. Its outputs live under
+10. If checking a proposal, call `moirix_authority_guard`. Its outputs live under
    `artifacts/moirix/authority_checks/<proposal-id>/` so a blocked proposal does
    not overwrite the primary thesis artifacts.
-10. State the authority boundary: event thesis and position decision artifacts
+11. State the authority boundary: event thesis and position decision artifacts
    are research proposals, not direct trading orders.
 
 ## Labels
@@ -131,6 +136,20 @@ full-notional direction signals. For `trim`, `sell`, and `cover`, use explicit
 target weight or current position value; do not infer a full flat target from a
 partial order when that context is missing.
 
+## Market Context Requirements
+
+`market_context.json` must use `schema_version: vibe.moirix_market_context.v1`
+and remain a Vibe-side market artifact:
+
+- use Vibe loaders for OHLCV and benchmark context;
+- preserve requested and effective source names;
+- default A-share source should be `auto`, keeping Tushare first and free
+  loaders as fallback;
+- do not call or write Moirix source-lake state;
+- do not include post-`as_of` bars unless the user explicitly asks for
+  retrospective validation;
+- do not treat market context as PIT news evidence or a broker order.
+
 ## Safety
 
 - Do not turn event theses or position decisions into direct orders.
@@ -139,6 +158,7 @@ partial order when that context is missing.
 - For execution, use only `moirix_execute_trade_proposal`; it must verify an
   explicit approval artifact and fail closed. Live execution is blocked in v1.
 - Do not route news through market-data loaders.
+- Do not route market OHLCV context through Moirix source-lake writes.
 - Do not claim historical or real-time news coverage unless Moirix returns
   coverage evidence for the requested window.
 - Treat missing `adapter_call_status.json` on adapter-backed runs as an

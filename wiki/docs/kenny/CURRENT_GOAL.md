@@ -78,6 +78,7 @@ A successful Moirix thesis run writes:
 ```text
 artifacts/moirix/news_evidence.jsonl
 artifacts/moirix/adapter_call_status.json
+artifacts/moirix/market_context.json
 artifacts/moirix/event_thesis_graph.json
 artifacts/moirix/event_thesis_report.md
 artifacts/moirix/event_decision_context.json
@@ -143,6 +144,7 @@ Current stage:
 
 - `moirix_status`
 - `moirix_query_news`
+- `moirix_market_context`
 - `moirix_portfolio_context`
 - `moirix_write_event_thesis`
 - `moirix_write_position_decision`
@@ -178,6 +180,9 @@ Current stage:
 - `moirix_query_news` and adapter-backed tools write `adapter_call_status.json`
   and fail closed on timeout, invalid JSON, blocked source coverage, or adapter
   unavailability.
+- `moirix_market_context` writes Vibe loader-backed market context with
+  requested/effective data-source provenance, and it does not include
+  post-`as_of` bars unless explicitly requested for retrospective validation.
 - `moirix_write_event_thesis` writes thesis/report/authority artifacts when
   matching nonblocked PIT evidence exists.
 - `moirix_write_event_thesis` rejects empty evidence, non-`query-news`
