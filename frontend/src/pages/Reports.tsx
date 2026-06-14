@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
@@ -18,16 +19,8 @@ import { cn } from "@/lib/utils";
 const REPORT_SCAN_LIMIT = 100;
 type ReportSortKey = "created_desc" | "created_asc" | "return_desc" | "sharpe_desc" | "status_asc" | "run_id_desc";
 
-const REPORT_SORT_OPTIONS: { value: ReportSortKey; label: string }[] = [
-  { value: "created_desc", label: "Newest first" },
-  { value: "created_asc", label: "Oldest first" },
-  { value: "return_desc", label: "Best return" },
-  { value: "sharpe_desc", label: "Best Sharpe" },
-  { value: "status_asc", label: "Status A-Z" },
-  { value: "run_id_desc", label: "Run ID Z-A" },
-];
-
 export function Reports() {
+  const { t } = useTranslation();
   const [runs, setRuns] = useState<RunListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,7 +37,7 @@ export function Reports() {
       setRuns(Array.isArray(list) ? list : []);
     } catch (err) {
       setRuns([]);
-      setError(err instanceof Error ? err.message : "Unable to load reports.");
+      setError(err instanceof Error ? err.message : t("reports.loadError"));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -70,6 +63,14 @@ export function Reports() {
     }) : runs;
     return [...filteredRuns].sort((a, b) => compareReports(a, b, sortKey));
   }, [runs, query, sortKey]);
+  const sortOptions: { value: ReportSortKey; label: string }[] = [
+    { value: "created_desc", label: t("reports.sortNewest") },
+    { value: "created_asc", label: t("reports.sortOldest") },
+    { value: "return_desc", label: t("reports.sortBestReturn") },
+    { value: "sharpe_desc", label: t("reports.sortBestSharpe") },
+    { value: "status_asc", label: t("reports.sortStatus") },
+    { value: "run_id_desc", label: t("reports.sortRunId") },
+  ];
 
   return (
     <div className="min-h-screen p-6 lg:p-8">
@@ -78,12 +79,12 @@ export function Reports() {
           <div className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground">
               <FileText className="h-3.5 w-3.5" />
-              Reports
+              {t("reports.badge")}
             </div>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">Backtest Report Library</h1>
+              <h1 className="text-3xl font-bold tracking-tight">{t("reports.title")}</h1>
               <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                Browse historical backtest reports, metrics, artifacts, and run details from one place.
+                {t("reports.subtitle")}
               </p>
             </div>
           </div>
@@ -94,7 +95,7 @@ export function Reports() {
             className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-muted disabled:opacity-50"
           >
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Refresh
+            {t("reports.refresh")}
           </button>
         </section>
 
@@ -104,26 +105,26 @@ export function Reports() {
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search run id, prompt, symbol, status..."
+              placeholder={t("reports.searchPlaceholder")}
               className="w-full rounded-md border bg-background py-2 pl-9 pr-3 text-sm outline-none transition focus:border-primary"
             />
           </label>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between xl:justify-end">
             <label className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Sort</span>
+              <span className="text-muted-foreground">{t("reports.sortLabel")}</span>
               <select
                 value={sortKey}
                 onChange={(event) => setSortKey(event.target.value as ReportSortKey)}
                 className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none transition focus:border-primary"
-                aria-label="Sort reports"
+                aria-label={t("reports.sortAria")}
               >
-                {REPORT_SORT_OPTIONS.map((option) => (
+                {sortOptions.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
             </label>
             <div className="text-sm text-muted-foreground">
-              {filtered.length} of {runs.length} reports
+              {t("reports.count", { shown: filtered.length, total: runs.length })}
             </div>
           </div>
         </section>
@@ -140,7 +141,7 @@ export function Reports() {
           <section className="rounded-md border border-amber-500/30 bg-amber-500/5 p-5">
             <div className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-300">
               <AlertTriangle className="h-5 w-5" />
-              Report library unavailable
+              {t("reports.unavailableTitle")}
             </div>
             <p className="mt-2 text-sm text-muted-foreground">{error}</p>
           </section>
@@ -149,9 +150,9 @@ export function Reports() {
         {!loading && !error && filtered.length === 0 ? (
           <section className="rounded-md border border-dashed p-8 text-center">
             <FileText className="mx-auto h-8 w-8 text-muted-foreground" />
-            <h2 className="mt-3 font-medium">{runs.length === 0 ? "No reports yet" : "No matching reports"}</h2>
+            <h2 className="mt-3 font-medium">{runs.length === 0 ? t("reports.emptyTitle") : t("reports.noMatchesTitle")}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {runs.length === 0 ? "Create a backtest from Agent, then return here to review it." : "Adjust your search query."}
+              {runs.length === 0 ? t("reports.emptyBody") : t("reports.noMatchesBody")}
             </p>
           </section>
         ) : null}
@@ -169,6 +170,7 @@ export function Reports() {
 }
 
 function ReportRow({ run }: { run: RunListItem }) {
+  const { t } = useTranslation();
   const hasUsage = Boolean(run.llm_usage);
   return (
     <article className="rounded-md border p-4 transition hover:border-primary/40 hover:bg-muted/30">
@@ -180,9 +182,9 @@ function ReportRow({ run }: { run: RunListItem }) {
               {run.run_id}
             </Link>
             <span className="text-xs text-muted-foreground">{formatRunDate(run.created_at)}</span>
-            {hasUsage ? <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Usage</span> : null}
+            {hasUsage ? <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{t("reports.usageBadge")}</span> : null}
           </div>
-          <p className="line-clamp-2 text-sm text-muted-foreground">{run.prompt || "No prompt recorded."}</p>
+          <p className="line-clamp-2 text-sm text-muted-foreground">{run.prompt || t("reports.noPrompt")}</p>
           <div className="flex flex-wrap gap-1.5">
             {(run.codes || []).slice(0, 6).map((code) => (
               <span key={code} className="rounded border px-2 py-0.5 font-mono text-xs text-muted-foreground">
@@ -191,7 +193,7 @@ function ReportRow({ run }: { run: RunListItem }) {
             ))}
             {run.start_date || run.end_date ? (
               <span className="rounded border px-2 py-0.5 text-xs text-muted-foreground">
-                {run.start_date || "?"} to {run.end_date || "?"}
+                {t("reports.dateRange", { start: run.start_date || "?", end: run.end_date || "?" })}
               </span>
             ) : null}
           </div>
@@ -199,22 +201,22 @@ function ReportRow({ run }: { run: RunListItem }) {
 
         <div className="flex flex-col gap-3 lg:items-end">
           <div className="grid grid-cols-2 gap-2 text-right sm:flex sm:flex-wrap sm:justify-end">
-            <MetricPill label="Return" value={formatOptionalMetric("total_return", run.total_return)} />
-            <MetricPill label="Sharpe" value={formatOptionalMetric("sharpe", run.sharpe)} />
+            <MetricPill label={t("reports.return")} value={formatOptionalMetric("total_return", run.total_return)} />
+            <MetricPill label={t("reports.sharpe")} value={formatOptionalMetric("sharpe", run.sharpe)} />
           </div>
           <div className="flex flex-wrap gap-2 lg:justify-end">
             <Link
               to={`/runs/${run.run_id}`}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition hover:opacity-90"
             >
-              Full Report <ArrowRight className="h-3.5 w-3.5" />
+              {t("reports.fullReport")} <ArrowRight className="h-3.5 w-3.5" />
             </Link>
             <Link
               to="/compare"
               className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition hover:bg-muted"
             >
               <GitCompare className="h-3.5 w-3.5" />
-              Compare
+              {t("reports.compare")}
             </Link>
           </div>
         </div>
@@ -224,6 +226,7 @@ function ReportRow({ run }: { run: RunListItem }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
   const normalized = status.toLowerCase();
   const ok = ["success", "done", "completed", "complete"].includes(normalized);
   return (
@@ -234,7 +237,7 @@ function StatusBadge({ status }: { status: string }) {
       )}
     >
       {ok ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
-      {status || "unknown"}
+      {status || t("reports.unknown")}
     </span>
   );
 }

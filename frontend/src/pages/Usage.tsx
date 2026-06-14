@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
   AlertTriangle,
@@ -16,6 +17,7 @@ const USAGE_RUN_SCAN_LIMIT = 100;
 const HEAVY_RUN_LIMIT = 8;
 
 export function Usage() {
+  const { t } = useTranslation();
   const [runs, setRuns] = useState<UsageRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -54,7 +56,7 @@ export function Usage() {
       setRuns(usageRuns);
     } catch (err) {
       setRuns([]);
-      setError(err instanceof Error ? err.message : "Unable to load agent usage.");
+      setError(err instanceof Error ? err.message : t("usage.loadError"));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -79,13 +81,12 @@ export function Usage() {
           <div className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-medium text-muted-foreground">
               <Gauge className="h-3.5 w-3.5" />
-              Agent Usage
+              {t("usage.badge")}
             </div>
             <div>
-              <h1 className="text-3xl font-bold tracking-tight">Agent Usage Dashboard</h1>
+              <h1 className="text-3xl font-bold tracking-tight">{t("usage.title")}</h1>
               <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                Aggregates persisted <span className="font-mono">artifacts/llm_usage.json</span> from recent runs.
-                Token counts are shown as provider-reported usage; prices are intentionally not estimated.
+                {t("usage.subtitlePre")} <span className="font-mono">artifacts/llm_usage.json</span> {t("usage.subtitlePost")}
               </p>
             </div>
           </div>
@@ -96,7 +97,7 @@ export function Usage() {
             className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-muted disabled:opacity-50"
           >
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Refresh
+            {t("usage.refresh")}
           </button>
         </section>
 
@@ -112,7 +113,7 @@ export function Usage() {
           <section className="rounded-md border border-amber-500/30 bg-amber-500/5 p-5">
             <div className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-300">
               <AlertTriangle className="h-5 w-5" />
-              Usage dashboard unavailable
+              {t("usage.unavailableTitle")}
             </div>
             <p className="mt-2 text-sm text-muted-foreground">{error}</p>
           </section>
@@ -121,9 +122,9 @@ export function Usage() {
         {!loading && !error && runs.length === 0 ? (
           <section className="rounded-md border border-dashed p-8 text-center">
             <Bot className="mx-auto h-8 w-8 text-muted-foreground" />
-            <h2 className="mt-3 font-medium">No persisted usage found</h2>
+            <h2 className="mt-3 font-medium">{t("usage.emptyTitle")}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Recent runs do not have <span className="font-mono">llm_usage.json</span> artifacts yet.
+              {t("usage.emptyPre")} <span className="font-mono">llm_usage.json</span> {t("usage.emptyPost")}
             </p>
           </section>
         ) : null}
@@ -131,15 +132,15 @@ export function Usage() {
         {!loading && !error && runs.length > 0 ? (
           <>
             <section className="grid gap-3 md:grid-cols-4">
-              <SummaryTile label="Runs with usage" value={String(summary.runCount)} icon={Database} />
-              <SummaryTile label="LLM calls" value={formatNumber(summary.calls)} icon={Bot} />
-              <SummaryTile label="Input tokens" value={formatNumber(summary.inputTokens)} icon={BarChart3} />
-              <SummaryTile label="Output tokens" value={formatNumber(summary.outputTokens)} icon={BarChart3} />
+              <SummaryTile label={t("usage.runsWithUsage")} value={String(summary.runCount)} icon={Database} />
+              <SummaryTile label={t("usage.llmCalls")} value={formatNumber(summary.calls)} icon={Bot} />
+              <SummaryTile label={t("usage.inputTokens")} value={formatNumber(summary.inputTokens)} icon={BarChart3} />
+              <SummaryTile label={t("usage.outputTokens")} value={formatNumber(summary.outputTokens)} icon={BarChart3} />
             </section>
 
             <section className="grid gap-4 xl:grid-cols-[1fr_1.2fr]">
               <div className="rounded-md border p-4">
-                <h2 className="font-semibold">Provider / Model</h2>
+                <h2 className="font-semibold">{t("usage.providerModel")}</h2>
                 <div className="mt-4 space-y-3">
                   {modelRows.map((row) => (
                     <ModelUsageRow key={row.key} row={row} maxTokens={summary.totalTokens} />
@@ -148,7 +149,7 @@ export function Usage() {
               </div>
 
               <div className="rounded-md border p-4">
-                <h2 className="font-semibold">Usage-Heavy Runs</h2>
+                <h2 className="font-semibold">{t("usage.heavyRuns")}</h2>
                 <div className="mt-4 divide-y rounded-md border">
                   {heavyRuns.map((run) => (
                     <RunUsageRow key={run.runId} run={run} />
@@ -202,6 +203,7 @@ function SummaryTile({ label, value, icon: Icon }: { label: string; value: strin
 }
 
 function ModelUsageRow({ row, maxTokens }: { row: ModelUsageSummary; maxTokens: number }) {
+  const { t } = useTranslation();
   const width = maxTokens > 0 ? Math.max(4, Math.min(100, (row.totalTokens / maxTokens) * 100)) : 0;
   return (
     <div>
@@ -216,25 +218,26 @@ function ModelUsageRow({ row, maxTokens }: { row: ModelUsageSummary; maxTokens: 
         <div className="h-full bg-primary" style={{ width: `${width}%` }} />
       </div>
       <div className="mt-1 flex justify-between text-xs text-muted-foreground">
-        <span>{row.runCount} runs · {formatNumber(row.calls)} calls</span>
-        <span>{formatNumber(row.inputTokens)} in / {formatNumber(row.outputTokens)} out</span>
+        <span>{t("usage.modelUsageCounts", { runs: row.runCount, calls: formatNumber(row.calls) })}</span>
+        <span>{t("usage.modelTokenCounts", { input: formatNumber(row.inputTokens), output: formatNumber(row.outputTokens) })}</span>
       </div>
     </div>
   );
 }
 
 function RunUsageRow({ run }: { run: UsageRun }) {
+  const { t } = useTranslation();
   return (
     <Link to={`/runs/${run.runId}`} className="block p-3 transition hover:bg-muted/40">
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <div className="truncate font-mono text-sm font-medium">{run.runId}</div>
-          <div className="mt-1 truncate text-xs text-muted-foreground">{run.prompt || "No prompt recorded."}</div>
+          <div className="mt-1 truncate text-xs text-muted-foreground">{run.prompt || t("usage.noPrompt")}</div>
         </div>
         <div className="flex flex-wrap gap-2 text-xs md:justify-end">
-          <UsagePill label="total" value={formatNumber(run.totalTokens)} />
-          <UsagePill label="calls" value={formatNumber(run.calls)} />
-          <UsagePill label="created" value={formatRunDate(run.createdAt)} />
+          <UsagePill label={t("usage.total")} value={formatNumber(run.totalTokens)} />
+          <UsagePill label={t("usage.calls")} value={formatNumber(run.calls)} />
+          <UsagePill label={t("usage.created")} value={formatRunDate(run.createdAt)} />
         </div>
       </div>
     </Link>

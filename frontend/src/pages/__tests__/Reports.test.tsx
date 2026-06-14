@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { Reports } from "../Reports";
 import type { RunListItem } from "@/lib/api";
+import i18n from "@/i18n";
 
 const apiMock = vi.hoisted(() => ({
   listRuns: vi.fn(),
@@ -36,6 +37,7 @@ function makeRun(overrides: Partial<RunListItem> = {}): RunListItem {
 
 describe("Reports page", () => {
   beforeEach(() => {
+    i18n.changeLanguage("en");
     apiMock.listRuns.mockReset();
   });
 
@@ -66,6 +68,17 @@ describe("Reports page", () => {
 
     expect(screen.queryByText("run-aapl")).not.toBeInTheDocument();
     expect(screen.getByText("run-nvda")).toBeInTheDocument();
+  });
+
+  it("renders the report library in Chinese", async () => {
+    i18n.changeLanguage("zh-CN");
+    apiMock.listRuns.mockResolvedValue([]);
+
+    renderReports();
+
+    expect(await screen.findByText("回测报告库")).toBeInTheDocument();
+    expect(screen.getByText("暂无报告")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("搜索 run id、prompt、标的或状态...")).toBeInTheDocument();
   });
 
   it("sorts reports newest first by default", async () => {

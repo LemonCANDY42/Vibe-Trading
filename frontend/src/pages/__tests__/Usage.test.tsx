@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { Usage } from "../Usage";
 import type { RunData, RunListItem } from "@/lib/api";
+import i18n from "@/i18n";
 
 const apiMock = vi.hoisted(() => ({
   listRuns: vi.fn(),
@@ -49,6 +50,7 @@ function makeDetail(overrides: Partial<RunData> = {}): RunData {
 
 describe("Usage dashboard", () => {
   beforeEach(() => {
+    i18n.changeLanguage("en");
     apiMock.listRuns.mockReset();
     apiMock.getRun.mockReset();
   });
@@ -107,6 +109,17 @@ describe("Usage dashboard", () => {
     renderUsage();
 
     expect(await screen.findByText("No persisted usage found")).toBeInTheDocument();
+  });
+
+  it("renders the usage dashboard in Chinese", async () => {
+    i18n.changeLanguage("zh-CN");
+    apiMock.listRuns.mockResolvedValue([makeRun()]);
+    apiMock.getRun.mockResolvedValue({ run_id: "run-1", status: "success" });
+
+    renderUsage();
+
+    expect(await screen.findByText("智能体用量面板")).toBeInTheDocument();
+    expect(screen.getByText("未找到持久化用量")).toBeInTheDocument();
   });
 
   it("refreshes by reading recent run usage again", async () => {
